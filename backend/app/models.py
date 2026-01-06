@@ -124,7 +124,12 @@ class Key(Base):
 
     product = relationship("Product", back_populates="keys")
     sold_to_user = relationship("User")
-    order = relationship("Order", back_populates="key")
+    order = relationship(
+        "Order",
+        back_populates="key",
+        foreign_keys="Key.order_id",
+        uselist=False,
+    )
 
     def activate(self, uuid: str):
         self.activation_uuid = uuid
@@ -154,5 +159,10 @@ class Order(Base):
 
     user = relationship("User", back_populates="orders")
     product = relationship("Product")
-    key = relationship("Key", back_populates="order")
+    key = relationship(
+        "Key",
+        back_populates="order",
+        foreign_keys="Order.key_id",
+        uselist=False,
+    )
 
