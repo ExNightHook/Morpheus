@@ -52,6 +52,11 @@ class ProductCreate(BaseModel):
     description: Optional[str] = None
 
 
+class ProductUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+
+
 class ProductPriceCreate(BaseModel):
     duration_days: int
     price_rub: float

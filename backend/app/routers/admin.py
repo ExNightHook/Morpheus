@@ -17,6 +17,8 @@ from app.models import (
     Key,
     KeyStatus,
     User,
+    Order,
+    OrderStatus,
 )
 from app.security import create_access_token, get_password_hash
 from app.utils import generate_key_value
@@ -65,6 +67,80 @@ def create_product(data: schemas.ProductCreate, db: Session = Depends(get_db), _
     db.commit()
     db.refresh(product)
     return product
+
+
+@router.put("/products/{product_id}", response_model=schemas.ProductOut)
+def update_product(
+    product_id: int,
+    data: schemas.ProductUpdate,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    """Редактирование продукта"""
+    product = db.query(Product).filter_by(id=product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    if data.title is not None:
+        product.title = data.title
+    if data.description is not None:
+        product.description = data.description
+    
+    db.commit()
+    db.refresh(product)
+    return product
+
+
+@router.delete("/products/{product_id}")
+def delete_product(
+    product_id: int,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    """Удаление продукта"""
+    product = db.query(Product).filter_by(id=product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    # Проверяем наличие активных заказов
+    active_orders = db.query(Order).filter_by(
+        product_id=product_id
+    ).filter(
+        Order.status.in_([OrderStatus.pending, OrderStatus.waiting])
+    ).count()
+    
+    if active_orders > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete product: {active_orders} active orders exist"
+        )
+    
+    # Удаляем связанные данные (каскадное удаление через БД или вручную)
+    # Удаляем билды и их файлы
+    builds = db.query(Build).filter_by(product_id=product_id).all()
+    for build in builds:
+        if os.path.exists(build.file_path):
+            try:
+                os.remove(build.file_path)
+            except Exception:
+                pass
+        db.delete(build)
+    
+    # Удаляем цены
+    prices = db.query(ProductPrice).filter_by(product_id=product_id).all()
+    for price in prices:
+        db.delete(price)
+    
+    # Удаляем ключи (если они не использованы в завершенных заказах)
+    keys = db.query(Key).filter_by(product_id=product_id).all()
+    for key in keys:
+        db.delete(key)
+    
+    # Удаляем продукт
+    db.delete(product)
+    db.commit()
+    
+    return {"success": True, "message": "Product deleted successfully"}
 
 
 @router.get("/products/{product_id}/prices", response_model=List[schemas.ProductPriceOut])
