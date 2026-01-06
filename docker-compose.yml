@@ -1,1 +1,60 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: morpheus-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-morpheus}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-morpheus}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-morpheus}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
 
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: morpheus-api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-morpheus}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-morpheus}
+      SECRET_KEY: ${SECRET_KEY:-please_change_me}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      BOT_ADMINS: ${BOT_ADMINS:-}
+      ANYPAY_PROJECT_ID: ${ANYPAY_PROJECT_ID:-}
+      ANYPAY_API_ID: ${ANYPAY_API_ID:-}
+      ANYPAY_API_KEY: ${ANYPAY_API_KEY:-}
+      ANYPAY_CURRENCY: ${ANYPAY_CURRENCY:-RUB}
+      ANYPAY_METHOD: ${ANYPAY_METHOD:-card}
+      ANYPAY_SUCCESS_URL: ${ANYPAY_SUCCESS_URL:-http://localhost/success}
+      ANYPAY_FAIL_URL: ${ANYPAY_FAIL_URL:-http://localhost/fail}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://localhost}
+    volumes:
+      - uploads_data:/app/uploads
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: morpheus-nginx
+    depends_on:
+      - api
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./deploy/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/certs:/etc/nginx/certs:ro
+      - uploads_data:/app/uploads:ro
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  uploads_data:
