@@ -117,13 +117,13 @@ class BotService:
                 if not products:
                     await message.answer("Товары временно недоступны.")
                     return
-                kb = InlineKeyboardMarkup()
-                for p in products:
-                    kb.add(
-                        InlineKeyboardButton(
-                            text=f"🛒 {p.title}", callback_data=f"product:{p.slug}"
-                        )
+                buttons = [
+                    InlineKeyboardButton(
+                        text=f"🛒 {p.title}", callback_data=f"product:{p.slug}"
                     )
+                    for p in products
+                ]
+                kb = InlineKeyboardMarkup(inline_keyboard=[[btn] for btn in buttons])
                 await message.answer("Выберите продукт:", reply_markup=kb)
 
         @dp.callback_query(F.data.startswith("product:"))
@@ -147,7 +147,7 @@ class BotService:
                 if not variants:
                     await call.answer("Нет вариантов подписки", show_alert=True)
                     return
-                kb = InlineKeyboardMarkup(row_width=2)
+                buttons = []
                 for v in variants:
                     available = (
                         db.query(Key)
@@ -160,19 +160,61 @@ class BotService:
                     )
                     if available == 0:
                         continue
-                    kb.add(
+                    buttons.append(
                         InlineKeyboardButton(
                             text=f"{v.duration_days} дн • {int(v.price_rub)}₽",
                             callback_data=f"buy:{product.slug}:{v.duration_days}",
                         )
                     )
-                kb.add(InlineKeyboardButton(text="↩️ Назад", callback_data="back"))
+                # Группируем кнопки по 2 в ряд
+                keyboard = []
+                for i in range(0, len(buttons), 2):
+                    row = buttons[i:i+2]
+                    keyboard.append(row)
+                if not buttons:
+                    await call.answer("Нет доступных вариантов подписки", show_alert=True)
+                    return
+                keyboard.append([InlineKeyboardButton(text="↩️ Назад", callback_data="back")])
+                kb = InlineKeyboardMarkup(inline_keyboard=keyboard)
                 text = f"<b>{product.title}</b>\n\n{product.description or 'Описание отсутствует.'}"
-                await call.message.edit_text(text, reply_markup=kb)
+                try:
+                    await call.message.edit_text(text, reply_markup=kb)
+                except Exception as e:
+                    logger.error(f"Error editing message: {e}")
+                    await call.message.answer(text, reply_markup=kb)
 
         @dp.callback_query(F.data == "back")
         async def back_to_catalog(call: CallbackQuery):
-            await show_products(call.message)
+            with SessionLocal() as db:
+                settings_obj = await self._get_settings(db)
+                if not settings_obj.bot_enabled:
+                    await call.answer("Бот отключен", show_alert=True)
+                    return
+                if settings_obj.maintenance_mode:
+                    await call.answer("⚠️ Технические работы.")
+                    return
+                products = (
+                    db.query(Product)
+                    .filter(Product.is_active == True)  # noqa: E712
+                    .all()
+                )
+                if not products:
+                    try:
+                        await call.message.edit_text("Товары временно недоступны.")
+                    except Exception:
+                        await call.message.answer("Товары временно недоступны.")
+                    return
+                buttons = [
+                    InlineKeyboardButton(
+                        text=f"🛒 {p.title}", callback_data=f"product:{p.slug}"
+                    )
+                    for p in products
+                ]
+                kb = InlineKeyboardMarkup(inline_keyboard=[[btn] for btn in buttons])
+                try:
+                    await call.message.edit_text("Выберите продукт:", reply_markup=kb)
+                except Exception:
+                    await call.message.answer("Выберите продукт:", reply_markup=kb)
 
         @dp.callback_query(F.data.startswith("buy:"))
         async def start_payment(call: CallbackQuery):
@@ -191,6 +233,9 @@ class BotService:
                     await call.answer("Перезапустите /start", show_alert=True)
                     return
                 product = db.query(Product).filter_by(slug=slug).first()
+                if not product:
+                    await call.answer("Товар не найден", show_alert=True)
+                    return
                 price = (
                     db.query(ProductPrice)
                     .filter_by(product_id=product.id, duration_days=duration)
@@ -242,13 +287,23 @@ class BotService:
                     await call.answer(f"Ошибка создания платежа: {e}", show_alert=True)
                     return
 
-                await call.message.edit_text(
-                    f"Подтвердите покупку <b>{product.title}</b> на {duration} дней за {int(order.amount)}₽.\n\n"
-                    f"Ссылка на оплату: {order.payment_url}\n\nПосле оплаты дождитесь сообщения с ключом.",
-                    reply_markup=InlineKeyboardMarkup().add(
-                        InlineKeyboardButton(text="Открыть оплату", url=order.payment_url)
-                    ),
-                )
+                try:
+                    await call.message.edit_text(
+                        f"Подтвердите покупку <b>{product.title}</b> на {duration} дней за {int(order.amount)}₽.\n\n"
+                        f"Ссылка на оплату: {order.payment_url}\n\nПосле оплаты дождитесь сообщения с ключом.",
+                        reply_markup=InlineKeyboardMarkup(
+                            inline_keyboard=[[InlineKeyboardButton(text="Открыть оплату", url=order.payment_url)]]
+                        ),
+                    )
+                except Exception as e:
+                    logger.error(f"Error editing payment message: {e}")
+                    await call.message.answer(
+                        f"Подтвердите покупку <b>{product.title}</b> на {duration} дней за {int(order.amount)}₽.\n\n"
+                        f"Ссылка на оплату: {order.payment_url}\n\nПосле оплаты дождитесь сообщения с ключом.",
+                        reply_markup=InlineKeyboardMarkup(
+                            inline_keyboard=[[InlineKeyboardButton(text="Открыть оплату", url=order.payment_url)]]
+                        ),
+                    )
 
     @staticmethod
     def main_menu():
