@@ -81,7 +81,7 @@ function generate_certs() {
     return
   fi
   echo "[*] Generating self-signed TLS certificate..."
-  openssl req -x509 -nodes -days 365 -newkey rsa4096 \
+  openssl req -x509 -nodes -days 365 -newkey rsa:2048 -sha256 \
     -keyout "${key}" \
     -out "${crt}" \
     -subj "/C=RU/ST=NA/L=NA/O=Morpheus/OU=Dev/CN=localhost"
