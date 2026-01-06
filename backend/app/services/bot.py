@@ -256,10 +256,8 @@ class BotService:
                 if not key:
                     await call.answer("Ключи закончились", show_alert=True)
                     return
-                key.status = KeyStatus.sold
-                key.sold_at = datetime.utcnow()
-                db.add(key)
-
+                
+                # Создаем заказ БЕЗ изменения статуса ключа
                 order = Order(
                     user_id=user.id,
                     product_id=product.id,
@@ -280,10 +278,16 @@ class BotService:
                     order.payment_url = payment_url
                     order.provider_pay_id = str(resp["result"]["pay_id"])
                     order.status = OrderStatus.waiting
+                    # Только после успешного создания платежа меняем статус ключа
+                    key.status = KeyStatus.sold
+                    key.sold_at = datetime.utcnow()
+                    key.sold_to_user_id = user.id
                     db.commit()
                 except Exception as e:
-                    order.status = OrderStatus.failed
+                    # При ошибке платежа - удаляем заказ и НЕ меняем статус ключа
+                    db.delete(order)
                     db.commit()
+                    logger.error(f"Payment creation error: {e}")
                     await call.answer(f"Ошибка создания платежа: {e}", show_alert=True)
                     return
 

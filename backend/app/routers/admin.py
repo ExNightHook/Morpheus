@@ -108,6 +108,53 @@ def add_price(
     return price
 
 
+@router.put("/products/{product_id}/prices/{price_id}", response_model=schemas.ProductPriceOut)
+def update_price(
+    product_id: int,
+    price_id: int,
+    payload: schemas.ProductPriceCreate,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    """Редактирование цены"""
+    product = db.query(Product).filter_by(id=product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    price = db.query(ProductPrice).filter_by(id=price_id, product_id=product_id).first()
+    if not price:
+        raise HTTPException(status_code=404, detail="Price not found")
+    
+    # Если меняется длительность, проверяем на дубликаты
+    if payload.duration_days != price.duration_days:
+        existing = db.query(ProductPrice).filter_by(
+            product_id=product_id, duration_days=payload.duration_days
+        ).first()
+        if existing and existing.id != price_id:
+            raise HTTPException(status_code=400, detail="Price for this duration already exists")
+    
+    price.duration_days = payload.duration_days
+    price.price_rub = payload.price_rub
+    db.commit()
+    db.refresh(price)
+    return price
+
+
+@router.delete("/products/{product_id}/prices/{price_id}")
+def delete_price(
+    product_id: int,
+    price_id: int,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    """Удаление цены"""
+    price = db.query(ProductPrice).filter_by(id=price_id, product_id=product_id).first()
+    if not price:
+        raise HTTPException(status_code=404, detail="Price not found")
+    db.delete(price)
+    db.commit()
+    return {"success": True}
+
+
 @router.get("/builds/{product_id}", response_model=List[schemas.BuildOut])
 def list_builds(
     product_id: int,
@@ -133,20 +180,46 @@ def upload_build(
     product = db.query(Product).filter_by(id=product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
+    
     uploads_dir = "/app/uploads"
     os.makedirs(uploads_dir, exist_ok=True)
-    # Сохраняем файл с уникальным именем
-    import uuid
-    file_ext = os.path.splitext(file.filename)[1] or ".zip"
-    unique_filename = f"{product.slug}_{label}_{uuid.uuid4().hex[:8]}{file_ext}"
-    file_path = os.path.join(uploads_dir, unique_filename)
-    with open(file_path, "wb") as f:
-        f.write(file.file.read())
-    build = Build(product_id=product_id, label=label, file_path=file_path)
-    db.add(build)
-    db.commit()
-    db.refresh(build)
-    return build
+    
+    # Проверяем, есть ли уже билд с такой версией
+    existing_build = db.query(Build).filter_by(product_id=product_id, label=label).first()
+    
+    # Деактивируем все старые билды этого продукта
+    old_builds = db.query(Build).filter_by(product_id=product_id, is_active=True).all()
+    for old_build in old_builds:
+        old_build.is_active = False
+    
+    # Если билд с такой версией существует - удаляем старый файл
+    if existing_build:
+        if os.path.exists(existing_build.file_path):
+            try:
+                os.remove(existing_build.file_path)
+            except Exception:
+                pass  # Игнорируем ошибки удаления
+        # Обновляем существующий билд
+        file_ext = os.path.splitext(file.filename)[1] or ".zip"
+        file_path = os.path.join(uploads_dir, f"{product.slug}_{label}{file_ext}")
+        with open(file_path, "wb") as f:
+            f.write(file.file.read())
+        existing_build.file_path = file_path
+        existing_build.is_active = True
+        db.commit()
+        db.refresh(existing_build)
+        return existing_build
+    else:
+        # Создаем новый билд
+        file_ext = os.path.splitext(file.filename)[1] or ".zip"
+        file_path = os.path.join(uploads_dir, f"{product.slug}_{label}{file_ext}")
+        with open(file_path, "wb") as f:
+            f.write(file.file.read())
+        build = Build(product_id=product_id, label=label, file_path=file_path, is_active=True)
+        db.add(build)
+        db.commit()
+        db.refresh(build)
+        return build
 
 
 @router.get("/keys", response_model=List[schemas.KeyOut])

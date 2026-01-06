@@ -587,6 +587,10 @@
                             ${prices.length > 0 ? prices.map(p => `
                                 <div class="price-item">
                                     <span>${p.duration_days} дней - ${p.price_rub}₽</span>
+                                    <div class="actions">
+                                        <button class="btn btn-small" onclick="editPrice(${productId}, ${p.id}, ${p.duration_days}, ${p.price_rub})">Редактировать</button>
+                                        <button class="btn btn-small btn-danger" onclick="deletePrice(${productId}, ${p.id})">Удалить</button>
+                                    </div>
                                 </div>
                             `).join('') : '<p>Нет цен</p>'}
                         </div>
@@ -665,6 +669,82 @@
             }
         }
 
+        async function editPrice(productId, priceId, currentDuration, currentPrice) {
+            const modal = document.getElementById('productModal');
+            const modalTitle = document.getElementById('modal-title');
+            const modalContent = document.getElementById('modal-content');
+            
+            modalTitle.textContent = `Редактирование цены`;
+            modalContent.innerHTML = `
+                <form onsubmit="savePrice(event, ${productId}, ${priceId})">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Длительность (дней)</label>
+                            <input type="number" id="edit-price-duration-${priceId}" value="${currentDuration}" required min="1">
+                        </div>
+                        <div class="form-group">
+                            <label>Цена (рублей)</label>
+                            <input type="number" id="edit-price-amount-${priceId}" value="${currentPrice}" required min="0" step="0.01">
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 10px; margin-top: 20px;">
+                        <button type="submit" class="btn">Сохранить</button>
+                        <button type="button" class="btn btn-danger" onclick="closeProductModal(); manageProduct(${productId})">Отмена</button>
+                    </div>
+                </form>
+            `;
+            
+            modal.style.display = 'flex';
+        }
+
+        async function savePrice(e, productId, priceId) {
+            e.preventDefault();
+            const data = {
+                duration_days: parseInt(document.getElementById(`edit-price-duration-${priceId}`).value),
+                price_rub: parseFloat(document.getElementById(`edit-price-amount-${priceId}`).value)
+            };
+            
+            try {
+                const response = await apiCall(`/admin/products/${productId}/prices/${priceId}`, {
+                    method: 'PUT',
+                    body: JSON.stringify(data)
+                });
+                
+                if (response.ok) {
+                    showAlert('Цена обновлена!');
+                    closeProductModal();
+                    manageProduct(productId);
+                } else {
+                    const error = await response.json();
+                    showAlert('Ошибка: ' + (error.detail || 'Неизвестная ошибка'), 'error');
+                }
+            } catch (e) {
+                showAlert('Ошибка сохранения цены', 'error');
+            }
+        }
+
+        async function deletePrice(productId, priceId) {
+            if (!confirm('Вы уверены, что хотите удалить эту цену?')) {
+                return;
+            }
+            
+            try {
+                const response = await apiCall(`/admin/products/${productId}/prices/${priceId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    showAlert('Цена удалена!');
+                    manageProduct(productId);
+                } else {
+                    const error = await response.json();
+                    showAlert('Ошибка: ' + (error.detail || 'Неизвестная ошибка'), 'error');
+                }
+            } catch (e) {
+                showAlert('Ошибка удаления цены', 'error');
+            }
+        }
+
         async function uploadBuild(e, productId) {
             e.preventDefault();
             const formData = new FormData();
@@ -678,7 +758,7 @@
                 });
                 
                 if (response.ok) {
-                    showAlert('Билд загружен!');
+                    showAlert('Билд загружен! Старые билды автоматически деактивированы.');
                     document.getElementById(`build-file-${productId}`).value = '';
                     document.getElementById(`build-label-${productId}`).value = '';
                     manageProduct(productId);
