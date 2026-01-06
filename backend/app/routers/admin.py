@@ -125,6 +125,11 @@ def delete_product(
             )
         
         # Удаляем связанные данные (каскадное удаление через БД или вручную)
+        # Удаляем все заказы, связанные с продуктом (включая завершенные)
+        orders = db.query(Order).filter_by(product_id=product_id).all()
+        for order in orders:
+            db.delete(order)
+        
         # Удаляем билды и их файлы
         builds = db.query(Build).filter_by(product_id=product_id).all()
         for build in builds:
