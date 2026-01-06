@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import secrets
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,7 +16,24 @@ from app.services.bot import run_bot
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("morpheus")
 
-app = FastAPI(title="Morpheus Backend")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    Base.metadata.create_all(bind=engine)
+    ensure_admin()
+    try:
+        asyncio.create_task(run_bot())
+        logger.info("Bot task started")
+    except Exception as e:
+        logger.error(f"Failed to start bot: {e}")
+    logger.info("Startup complete")
+    yield
+    # Shutdown
+    logger.info("Shutdown")
+
+
+app = FastAPI(title="Morpheus Backend", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -28,14 +46,6 @@ app.add_middleware(
 app.include_router(admin.router)
 app.include_router(public.router)
 app.include_router(payments.router)
-
-
-@app.on_event("startup")
-async def startup_event():
-    Base.metadata.create_all(bind=engine)
-    ensure_admin()
-    asyncio.create_task(run_bot())
-    logger.info("Startup complete")
 
 
 def ensure_admin():

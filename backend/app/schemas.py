@@ -20,7 +20,7 @@ class ProductPriceOut(BaseModel):
     price_rub: float
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class BuildOut(BaseModel):
@@ -30,7 +30,7 @@ class BuildOut(BaseModel):
     is_active: bool
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class ProductOut(BaseModel):
@@ -43,7 +43,7 @@ class ProductOut(BaseModel):
     builds: List[BuildOut] = []
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class ProductCreate(BaseModel):
@@ -64,7 +64,7 @@ class BotSettingsOut(BaseModel):
     technical_message: Optional[str]
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class BotSettingsUpdate(BaseModel):
@@ -83,7 +83,7 @@ class KeyOut(BaseModel):
     expires_at: Optional[datetime]
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class KeysGenerateRequest(BaseModel):
@@ -100,7 +100,7 @@ class OrderOut(BaseModel):
     created_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class AnypayWebhook(BaseModel):

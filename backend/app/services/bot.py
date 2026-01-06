@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from typing import Callable, Optional
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -8,6 +9,8 @@ from datetime import datetime
 
 from app.config import settings
 from app.database import SessionLocal
+
+logger = logging.getLogger("morpheus.bot")
 from app.models import (
     BotSettings,
     Product,
@@ -288,8 +291,12 @@ bot_service: Optional[BotService] = None
 
 async def run_bot():
     global bot_service
-    if not settings.telegram_bot_token:
-        return
-    bot_service = BotService()
-    await bot_service.start()
+    try:
+        if not settings.telegram_bot_token:
+            logger.warning("TELEGRAM_BOT_TOKEN not set, bot will not start")
+            return
+        bot_service = BotService()
+        await bot_service.start()
+    except Exception as e:
+        logger.error(f"Bot error: {e}", exc_info=True)
 
