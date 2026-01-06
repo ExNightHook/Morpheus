@@ -1,6 +1,5 @@
 from pydantic_settings import BaseSettings
-from pydantic import Field, field_validator
-from typing import List, Union
+from pydantic import Field
 
 
 class Settings(BaseSettings):
@@ -14,7 +13,8 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = Field(60 * 24, env="ACCESS_TOKEN_EXPIRE_MINUTES")
 
     telegram_bot_token: str = Field("", env="TELEGRAM_BOT_TOKEN")
-    bot_admins: List[int] = Field(default_factory=list, env="BOT_ADMINS")
+    # список ID админов, разделённых запятой; парсинг делаем вручную
+    bot_admins: str = Field("", env="BOT_ADMINS")
 
     public_base_url: str = Field("https://localhost", env="PUBLIC_BASE_URL")
 
@@ -30,13 +30,6 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
-
-    @field_validator("bot_admins", pre=True)
-    @classmethod
-    def split_admins(cls, v: Union[str, List[int]]):
-        if isinstance(v, str):
-            return [int(x.strip()) for x in v.split(",") if x.strip().isdigit()]
-        return v
 
 
 settings = Settings()

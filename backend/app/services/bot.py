@@ -43,10 +43,15 @@ class BotService:
     async def _require_user(self, db: Session, message: Message) -> User:
         user = db.query(User).filter_by(telegram_id=message.from_user.id).first()
         if not user:
+            admin_ids = [
+                int(x.strip())
+                for x in (settings.bot_admins or "").split(",")
+                if x.strip().isdigit()
+            ]
             user = User(
                 telegram_id=message.from_user.id,
                 username=message.from_user.username or message.from_user.full_name,
-                is_admin=message.from_user.id in settings.bot_admins,
+                is_admin=message.from_user.id in admin_ids,
             )
             db.add(user)
             db.commit()
