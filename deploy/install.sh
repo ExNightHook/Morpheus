@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || echo "")"
+# Если скрипт запущен через bash <(curl ...) BASH_SOURCE может указывать на /dev/fd/*
+if [[ -z "${SCRIPT_DIR}" || "${SCRIPT_DIR}" == "/dev" || "${SCRIPT_DIR}" == "/dev/fd"* ]]; then
+  # Разворачиваем репозиторий в /opt/Morpheus по умолчанию
+  PROJECT_ROOT="/opt/Morpheus"
+else
+  PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+fi
 ENV_FILE="${PROJECT_ROOT}/.env"
 SAMPLE_ENV="${PROJECT_ROOT}/env.sample"
 CERT_DIR="${PROJECT_ROOT}/deploy/certs"
@@ -35,8 +42,31 @@ function install_docker() {
 
 function ensure_env() {
   if [[ ! -f "${ENV_FILE}" ]]; then
-    echo "[*] Creating .env from sample. Please edit values after installation."
-    cp "${SAMPLE_ENV}" "${ENV_FILE}"
+    if [[ -f "${SAMPLE_ENV}" ]]; then
+      echo "[*] Creating .env from sample. Please edit values after installation."
+      cp "${SAMPLE_ENV}" "${ENV_FILE}"
+    else
+      echo "[!] env.sample not found in ${PROJECT_ROOT}, creating minimal .env"
+      cat > "${ENV_FILE}" <<EOF
+POSTGRES_USER=morpheus
+POSTGRES_PASSWORD=$(openssl rand -hex 12)
+POSTGRES_DB=morpheus
+HTTP_PORT=80
+HTTPS_PORT=443
+SECRET_KEY=$(openssl rand -hex 32)
+ACCESS_TOKEN_EXPIRE_MINUTES=1440
+TELEGRAM_BOT_TOKEN=
+BOT_ADMINS=
+ANYPAY_PROJECT_ID=
+ANYPAY_API_ID=
+ANYPAY_API_KEY=
+ANYPAY_CURRENCY=RUB
+ANYPAY_METHOD=card
+ANYPAY_SUCCESS_URL=http://localhost/success
+ANYPAY_FAIL_URL=http://localhost/fail
+PUBLIC_BASE_URL=https://localhost
+EOF
+    fi
   else
     echo "[*] .env already exists, skipping copy."
   fi
