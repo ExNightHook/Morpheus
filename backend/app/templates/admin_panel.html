@@ -381,6 +381,12 @@
             </div>
             <div class="card">
                 <h2>Список ключей</h2>
+                <div class="form-group" style="margin-bottom: 20px;">
+                    <label>Фильтр по продукту</label>
+                    <select id="keys-filter-product" onchange="loadKeys()">
+                        <option value="">Все продукты</option>
+                    </select>
+                </div>
                 <div id="keys-list" class="loading">Загрузка...</div>
             </div>
         </div>
@@ -718,7 +724,13 @@
                 const response = await apiCall('/admin/products');
                 const products = await response.json();
                 const select = document.getElementById('key-product');
-                select.innerHTML = '<option value="">Выберите продукт</option>' +
+                const filterSelect = document.getElementById('keys-filter-product');
+                
+                const options = '<option value="">Выберите продукт</option>' +
+                    products.map(p => `<option value="${p.id}">${p.title} (${p.slug})</option>`).join('');
+                
+                select.innerHTML = options;
+                filterSelect.innerHTML = '<option value="">Все продукты</option>' +
                     products.map(p => `<option value="${p.id}">${p.title} (${p.slug})</option>`).join('');
             } catch (e) {
                 console.error(e);
@@ -756,7 +768,9 @@
 
         async function loadKeys() {
             try {
-                const response = await apiCall('/admin/keys');
+                const productId = document.getElementById('keys-filter-product').value;
+                const url = productId ? `/admin/keys?product_id=${productId}` : '/admin/keys';
+                const response = await apiCall(url);
                 const keys = await response.json();
                 const listDiv = document.getElementById('keys-list');
                 
@@ -773,7 +787,9 @@
                                 <th>Длительность</th>
                                 <th>Статус</th>
                                 <th>UUID</th>
+                                <th>Окончание</th>
                                 <th>Создан</th>
+                                <th>Действия</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -787,7 +803,12 @@
                                         ${k.status === 'activated' ? '<span class="badge badge-success">Активирован</span>' : ''}
                                     </td>
                                     <td>${k.activation_uuid || '-'}</td>
+                                    <td>${k.expires_at ? new Date(k.expires_at).toLocaleString('ru-RU') : '-'}</td>
                                     <td>${new Date(k.created_at).toLocaleDateString('ru-RU')}</td>
+                                    <td>
+                                        <button class="btn btn-small" onclick="editKey(${k.id})">Редактировать</button>
+                                        <button class="btn btn-small btn-danger" onclick="deleteKey(${k.id})">Удалить</button>
+                                    </td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -796,6 +817,115 @@
                 `;
             } catch (e) {
                 document.getElementById('keys-list').innerHTML = '<p style="color: red;">Ошибка загрузки</p>';
+            }
+        }
+
+        async function editKey(keyId) {
+            try {
+                const response = await apiCall('/admin/keys');
+                const keys = await response.json();
+                const key = keys.find(k => k.id === keyId);
+                
+                if (!key) {
+                    showAlert('Ключ не найден', 'error');
+                    return;
+                }
+                
+                const modal = document.getElementById('productModal');
+                const modalTitle = document.getElementById('modal-title');
+                const modalContent = document.getElementById('modal-content');
+                
+                modalTitle.textContent = `Редактирование ключа: ${key.value}`;
+                modalContent.innerHTML = `
+                    <form onsubmit="saveKey(event, ${key.id})">
+                        <div class="form-group">
+                            <label>Длительность (дней)</label>
+                            <input type="number" id="edit-duration-${key.id}" value="${key.duration_days}" min="1" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Статус</label>
+                            <select id="edit-status-${key.id}">
+                                <option value="available" ${key.status === 'available' ? 'selected' : ''}>Доступен</option>
+                                <option value="sold" ${key.status === 'sold' ? 'selected' : ''}>Продан</option>
+                                <option value="activated" ${key.status === 'activated' ? 'selected' : ''}>Активирован</option>
+                                <option value="expired" ${key.status === 'expired' ? 'selected' : ''}>Истек</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>UUID активации</label>
+                            <input type="text" id="edit-uuid-${key.id}" value="${key.activation_uuid || ''}" placeholder="Оставьте пустым, чтобы убрать">
+                        </div>
+                        <div class="form-group">
+                            <label>Дата окончания</label>
+                            <input type="datetime-local" id="edit-expires-${key.id}" value="${key.expires_at ? new Date(key.expires_at).toISOString().slice(0, 16) : ''}">
+                        </div>
+                        <div style="display: flex; gap: 10px; margin-top: 20px;">
+                            <button type="submit" class="btn">Сохранить</button>
+                            <button type="button" class="btn btn-danger" onclick="closeProductModal()">Отмена</button>
+                        </div>
+                    </form>
+                `;
+                
+                modal.style.display = 'flex';
+            } catch (e) {
+                showAlert('Ошибка загрузки ключа', 'error');
+            }
+        }
+
+        async function saveKey(e, keyId) {
+            e.preventDefault();
+            const data = {
+                duration_days: parseInt(document.getElementById(`edit-duration-${keyId}`).value),
+                status: document.getElementById(`edit-status-${keyId}`).value,
+                activation_uuid: document.getElementById(`edit-uuid-${keyId}`).value || null,
+            };
+            
+            const expiresValue = document.getElementById(`edit-expires-${keyId}`).value;
+            if (expiresValue) {
+                data.expires_at = new Date(expiresValue).toISOString();
+            } else {
+                data.expires_at = null;
+            }
+            
+            try {
+                const response = await apiCall(`/admin/keys/${keyId}`, {
+                    method: 'PUT',
+                    body: JSON.stringify(data)
+                });
+                
+                if (response.ok) {
+                    showAlert('Ключ обновлен!');
+                    closeProductModal();
+                    loadKeys();
+                } else {
+                    const error = await response.json();
+                    showAlert('Ошибка: ' + (error.detail || 'Неизвестная ошибка'), 'error');
+                }
+            } catch (e) {
+                showAlert('Ошибка сохранения ключа', 'error');
+            }
+        }
+
+        async function deleteKey(keyId) {
+            if (!confirm('Вы уверены, что хотите удалить этот ключ?')) {
+                return;
+            }
+            
+            try {
+                const response = await apiCall(`/admin/keys/${keyId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    showAlert('Ключ удален!');
+                    loadKeys();
+                    loadDashboard();
+                } else {
+                    const error = await response.json();
+                    showAlert('Ошибка: ' + (error.detail || 'Неизвестная ошибка'), 'error');
+                }
+            } catch (e) {
+                showAlert('Ошибка удаления ключа', 'error');
             }
         }
 

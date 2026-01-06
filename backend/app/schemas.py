@@ -92,6 +92,13 @@ class KeysGenerateRequest(BaseModel):
     count: int = Field(gt=0, le=1000)
 
 
+class KeyUpdate(BaseModel):
+    duration_days: Optional[int] = None
+    status: Optional[KeyStatus] = None
+    activation_uuid: Optional[str] = None
+    expires_at: Optional[datetime] = None
+
+
 class OrderOut(BaseModel):
     id: int
     amount: float

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from fastapi.responses import HTMLResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 import os
 
 from app import schemas
@@ -150,8 +150,16 @@ def upload_build(
 
 
 @router.get("/keys", response_model=List[schemas.KeyOut])
-def list_keys(db: Session = Depends(get_db), _: AdminUser = Depends(get_current_admin)):
-    keys = db.query(Key).order_by(Key.created_at.desc()).limit(500).all()
+def list_keys(
+    product_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    """Список ключей с фильтрацией по продукту"""
+    query = db.query(Key)
+    if product_id:
+        query = query.filter_by(product_id=product_id)
+    keys = query.order_by(Key.created_at.desc()).limit(500).all()
     return keys
 
 
@@ -177,6 +185,47 @@ def generate_keys(
         created.append(key)
     db.commit()
     return created
+
+
+@router.put("/keys/{key_id}", response_model=schemas.KeyOut)
+def update_key(
+    key_id: int,
+    payload: schemas.KeyUpdate,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    """Редактирование ключа"""
+    key = db.query(Key).filter_by(id=key_id).first()
+    if not key:
+        raise HTTPException(status_code=404, detail="Key not found")
+    
+    if payload.duration_days is not None:
+        key.duration_days = payload.duration_days
+    if payload.status is not None:
+        key.status = payload.status
+    if payload.activation_uuid is not None:
+        key.activation_uuid = payload.activation_uuid
+    if payload.expires_at is not None:
+        key.expires_at = payload.expires_at
+    
+    db.commit()
+    db.refresh(key)
+    return key
+
+
+@router.delete("/keys/{key_id}")
+def delete_key(
+    key_id: int,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    """Удаление ключа"""
+    key = db.query(Key).filter_by(id=key_id).first()
+    if not key:
+        raise HTTPException(status_code=404, detail="Key not found")
+    db.delete(key)
+    db.commit()
+    return {"success": True}
 
 
 @router.get("/settings", response_model=schemas.BotSettingsOut)

@@ -21,6 +21,23 @@ logger = logging.getLogger("morpheus")
 async def lifespan(app: FastAPI):
     # Startup
     Base.metadata.create_all(bind=engine)
+    # Миграция: изменение типа telegram_id на BigInteger
+    try:
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            # Проверяем текущий тип колонки
+            result = conn.execute(text("""
+                SELECT data_type FROM information_schema.columns 
+                WHERE table_name = 'users' AND column_name = 'telegram_id'
+            """))
+            row = result.fetchone()
+            if row and row[0] == 'integer':
+                # Меняем тип на bigint
+                conn.execute(text("ALTER TABLE users ALTER COLUMN telegram_id TYPE bigint"))
+                conn.commit()
+                logger.info("Migrated telegram_id to BigInteger")
+    except Exception as e:
+        logger.warning(f"Migration check failed (may be already migrated): {e}")
     ensure_admin()
     try:
         asyncio.create_task(run_bot())
