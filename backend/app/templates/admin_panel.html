@@ -892,13 +892,38 @@
                     method: 'DELETE'
                 });
                 
+                if (!response) {
+                    showAlert('Ошибка: Нет ответа от сервера', 'error');
+                    return;
+                }
+                
                 if (response.ok) {
-                    showAlert('Продукт удален!');
-                    loadProducts();
-                    loadDashboard();
+                    try {
+                        const result = await response.json();
+                        showAlert('Продукт удален!');
+                        loadProducts();
+                        loadDashboard();
+                    } catch (jsonError) {
+                        // Если ответ успешный, но не JSON - все равно считаем успехом
+                        showAlert('Продукт удален!');
+                        loadProducts();
+                        loadDashboard();
+                    }
                 } else {
-                    const error = await response.json();
-                    showAlert('Ошибка: ' + (error.detail || 'Неизвестная ошибка'), 'error');
+                    let errorMessage = 'Неизвестная ошибка';
+                    try {
+                        const error = await response.json();
+                        errorMessage = error.detail || error.message || errorMessage;
+                    } catch (jsonError) {
+                        // Если не удалось распарсить JSON, пробуем получить текст
+                        try {
+                            const text = await response.text();
+                            errorMessage = text || errorMessage;
+                        } catch (textError) {
+                            errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+                        }
+                    }
+                    showAlert('Ошибка: ' + errorMessage, 'error');
                 }
             } catch (e) {
                 console.error('Delete error:', e);
