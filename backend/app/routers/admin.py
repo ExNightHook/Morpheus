@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import HTMLResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from typing import List
@@ -15,11 +16,28 @@ from app.models import (
     Build,
     Key,
     KeyStatus,
+    User,
 )
 from app.security import create_access_token, get_password_hash
 from app.utils import generate_key_value
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+@router.get("/login", response_class=HTMLResponse)
+def login_page():
+    """Страница входа в админ-панель"""
+    template_path = os.path.join(os.path.dirname(__file__), "..", "templates", "admin_login.html")
+    with open(template_path, "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
+
+@router.get("/panel", response_class=HTMLResponse)
+def admin_panel_page(_: AdminUser = Depends(get_current_admin)):
+    """Главная страница админ-панели"""
+    template_path = os.path.join(os.path.dirname(__file__), "..", "templates", "admin_panel.html")
+    with open(template_path, "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
 
 
 @router.post("/login", response_model=schemas.TokenResponse)
@@ -152,4 +170,11 @@ def update_settings(
     db.commit()
     db.refresh(settings_obj)
     return settings_obj
+
+
+@router.get("/users", response_model=List[schemas.UserOut])
+def list_users(db: Session = Depends(get_db), _: AdminUser = Depends(get_current_admin)):
+    """Список пользователей"""
+    users = db.query(User).order_by(User.created_at.desc()).limit(500).all()
+    return users
 

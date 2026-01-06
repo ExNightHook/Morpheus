@@ -111,3 +111,14 @@ class AnypayWebhook(BaseModel):
     currency: str
     sign: str
 
+
+class UserOut(BaseModel):
+    id: int
+    telegram_id: int
+    username: Optional[str]
+    is_admin: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+

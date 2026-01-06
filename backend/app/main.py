@@ -67,5 +67,5 @@ def health():
 
 @app.get("/Morpheus Private/")
 def panel_entry():
-    return RedirectResponse(url="/docs")
+    return RedirectResponse(url="/admin/panel")
 
