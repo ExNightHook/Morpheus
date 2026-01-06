@@ -115,7 +115,6 @@ class Key(Base):
     duration_days = Column(Integer, nullable=False)
     status = Column(Enum(KeyStatus), default=KeyStatus.available)
     sold_to_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    order_id = Column(Integer, ForeignKey("orders.id"), nullable=True)
     activation_uuid = Column(String(120), nullable=True)
     sold_at = Column(DateTime, nullable=True)
     activated_at = Column(DateTime, nullable=True)
@@ -124,12 +123,7 @@ class Key(Base):
 
     product = relationship("Product", back_populates="keys")
     sold_to_user = relationship("User")
-    order = relationship(
-        "Order",
-        back_populates="key",
-        foreign_keys="Key.order_id",
-        uselist=False,
-    )
+    order = relationship("Order", back_populates="key", uselist=False)
 
     def activate(self, uuid: str):
         self.activation_uuid = uuid
@@ -159,10 +153,5 @@ class Order(Base):
 
     user = relationship("User", back_populates="orders")
     product = relationship("Product")
-    key = relationship(
-        "Key",
-        back_populates="order",
-        foreign_keys="Order.key_id",
-        uselist=False,
-    )
+    key = relationship("Key", back_populates="order", uselist=False)
 
