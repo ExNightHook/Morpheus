@@ -59,10 +59,18 @@ def list_products(db: Session = Depends(get_db), _: AdminUser = Depends(get_curr
 
 @router.post("/products", response_model=schemas.ProductOut)
 def create_product(data: schemas.ProductCreate, db: Session = Depends(get_db), _: AdminUser = Depends(get_current_admin)):
-    existing = db.query(Product).filter_by(slug=data.slug).first()
+    # Нормализуем slug: заменяем пробелы на дефисы и приводим к нижнему регистру
+    normalized_slug = data.slug.strip().replace(" ", "-").lower()
+    # Удаляем множественные дефисы
+    while "--" in normalized_slug:
+        normalized_slug = normalized_slug.replace("--", "-")
+    # Удаляем дефисы в начале и конце
+    normalized_slug = normalized_slug.strip("-")
+    
+    existing = db.query(Product).filter_by(slug=normalized_slug).first()
     if existing:
         raise HTTPException(status_code=400, detail="Slug already exists")
-    product = Product(slug=data.slug, title=data.title, description=data.description)
+    product = Product(slug=normalized_slug, title=data.title, description=data.description)
     db.add(product)
     db.commit()
     db.refresh(product)

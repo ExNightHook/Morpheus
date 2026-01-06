@@ -337,7 +337,7 @@
                 <form id="productForm" onsubmit="createProduct(event)">
                     <div class="form-group">
                         <label>Slug (уникальный идентификатор, используется в API)</label>
-                        <input type="text" id="product-slug" required placeholder="например: Sc12345">
+                        <input type="text" id="product-slug" required placeholder="например: Stalcraft chams (пробелы будут заменены на дефисы)">
                     </div>
                     <div class="form-group">
                         <label>Название</label>
@@ -557,8 +557,13 @@
                                     <td>
                                         <div class="actions">
                                             <button class="btn btn-small" onclick="manageProduct(${p.id})">Управление</button>
-                                            <button class="btn btn-small" onclick="editProduct(${p.id}, ${JSON.stringify(p.title)}, ${JSON.stringify(p.description || '')})">Редактировать</button>
-                                            <button class="btn btn-small btn-danger" onclick="deleteProduct(${p.id}, ${JSON.stringify(p.title)})">Удалить</button>
+                                            <button class="btn btn-small btn-edit-product" 
+                                                    data-product-id="${p.id}" 
+                                                    data-product-title="${(p.title || '').replace(/"/g, '&quot;')}" 
+                                                    data-product-description="${(p.description || '').replace(/"/g, '&quot;').replace(/\n/g, '\\n')}">Редактировать</button>
+                                            <button class="btn btn-small btn-danger btn-delete-product" 
+                                                    data-product-id="${p.id}" 
+                                                    data-product-title="${(p.title || '').replace(/"/g, '&quot;')}">Удалить</button>
                                         </div>
                                     </td>
                                 </tr>
@@ -808,27 +813,41 @@
             const modalTitle = document.getElementById('modal-title');
             const modalContent = document.getElementById('modal-content');
             
-            // Экранируем кавычки и спецсимволы
-            const safeTitle = String(currentTitle).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-            const safeDescription = String(currentDescription || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+            // Декодируем HTML entities
+            const title = currentTitle.replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+            const description = (currentDescription || '').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\\n/g, '\n');
             
             modalTitle.textContent = `Редактирование продукта`;
-            modalContent.innerHTML = `
-                <form onsubmit="saveProduct(event, ${productId})">
-                    <div class="form-group">
-                        <label>Название продукта</label>
-                        <input type="text" id="edit-product-title-${productId}" value="${safeTitle}" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Описание</label>
-                        <textarea id="edit-product-description-${productId}" rows="4">${safeDescription}</textarea>
-                    </div>
-                    <div style="display: flex; gap: 10px; margin-top: 20px;">
-                        <button type="submit" class="btn">Сохранить</button>
-                        <button type="button" class="btn btn-danger" onclick="closeProductModal(); loadProducts()">Отмена</button>
-                    </div>
-                </form>
+            const formHtml = `
+                <div style="background: white; padding: 20px; border-radius: 8px; max-width: 600px; width: 90%;">
+                    <form id="edit-product-form-${productId}">
+                        <div class="form-group">
+                            <label>Название продукта</label>
+                            <input type="text" id="edit-product-title-${productId}" value="${title.replace(/"/g, '&quot;').replace(/'/g, '&#39;')}" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Описание</label>
+                            <textarea id="edit-product-description-${productId}" rows="4">${description.replace(/"/g, '&quot;').replace(/'/g, '&#39;')}</textarea>
+                        </div>
+                        <div style="display: flex; gap: 10px; margin-top: 20px;">
+                            <button type="submit" class="btn">Сохранить</button>
+                            <button type="button" class="btn btn-danger" onclick="closeProductModal(); loadProducts()">Отмена</button>
+                        </div>
+                    </form>
+                </div>
             `;
+            modalContent.innerHTML = formHtml;
+            
+            // Добавляем обработчик формы после вставки в DOM
+            setTimeout(() => {
+                const form = document.getElementById(`edit-product-form-${productId}`);
+                if (form) {
+                    form.addEventListener('submit', function(e) {
+                        e.preventDefault();
+                        saveProduct(e, productId);
+                    });
+                }
+            }, 100);
             
             modal.style.display = 'flex';
         }
@@ -861,7 +880,10 @@
         }
 
         async function deleteProduct(productId, productTitle) {
-            if (!confirm(`Вы уверены, что хотите удалить продукт "${productTitle}"?\n\nЭто действие удалит все связанные данные:\n- Все цены\n- Все билды и их файлы\n- Все ключи\n\nПродукт нельзя удалить, если есть активные заказы.`)) {
+            // Декодируем HTML entities
+            const title = (productTitle || '').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+            
+            if (!confirm(`Вы уверены, что хотите удалить продукт "${title}"?\n\nЭто действие удалит все связанные данные:\n- Все цены\n- Все билды и их файлы\n- Все ключи\n\nПродукт нельзя удалить, если есть активные заказы.`)) {
                 return;
             }
             
@@ -879,7 +901,8 @@
                     showAlert('Ошибка: ' + (error.detail || 'Неизвестная ошибка'), 'error');
                 }
             } catch (e) {
-                showAlert('Ошибка удаления продукта', 'error');
+                console.error('Delete error:', e);
+                showAlert('Ошибка удаления продукта: ' + (e.message || 'Неизвестная ошибка'), 'error');
             }
         }
 
@@ -1183,6 +1206,32 @@
         document.getElementById('productModal').addEventListener('click', function(e) {
             if (e.target === this) {
                 closeProductModal();
+            }
+        });
+
+        // Делегирование событий для кнопок редактирования и удаления продуктов
+        document.addEventListener('click', function(e) {
+            // Проверяем, была ли нажата кнопка редактирования или её дочерний элемент
+            const editBtn = e.target.closest('.btn-edit-product');
+            if (editBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const productId = parseInt(editBtn.getAttribute('data-product-id'));
+                const productTitle = editBtn.getAttribute('data-product-title') || '';
+                const productDescription = editBtn.getAttribute('data-product-description') || '';
+                editProduct(productId, productTitle, productDescription);
+                return;
+            }
+            
+            // Проверяем, была ли нажата кнопка удаления или её дочерний элемент
+            const deleteBtn = e.target.closest('.btn-delete-product');
+            if (deleteBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const productId = parseInt(deleteBtn.getAttribute('data-product-id'));
+                const productTitle = deleteBtn.getAttribute('data-product-title') || '';
+                deleteProduct(productId, productTitle);
+                return;
             }
         });
 
