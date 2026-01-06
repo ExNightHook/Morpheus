@@ -81,6 +81,12 @@
             color: #333;
             font-size: 20px;
         }
+        .card h3 {
+            margin-bottom: 15px;
+            color: #555;
+            font-size: 16px;
+            margin-top: 20px;
+        }
         .form-group {
             margin-bottom: 20px;
         }
@@ -110,6 +116,11 @@
             grid-template-columns: 1fr 1fr;
             gap: 20px;
         }
+        .form-row-3 {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 20px;
+        }
         button.btn {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
@@ -129,6 +140,10 @@
         }
         button.btn-success {
             background: #27ae60;
+        }
+        button.btn-small {
+            padding: 6px 12px;
+            font-size: 12px;
         }
         table {
             width: 100%;
@@ -211,6 +226,7 @@
             font-size: 14px;
             color: #666;
             margin-bottom: 10px;
+            margin-top: 0;
         }
         .stat-card .value {
             font-size: 32px;
@@ -222,6 +238,50 @@
             padding: 40px;
             color: #666;
         }
+        .price-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            margin-bottom: 10px;
+        }
+        .price-item span {
+            font-weight: 500;
+        }
+        .build-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            margin-bottom: 10px;
+        }
+        .actions {
+            display: flex;
+            gap: 10px;
+        }
+        .alert {
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        .alert.show {
+            display: block;
+        }
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
     </style>
 </head>
 <body>
@@ -230,6 +290,8 @@
         <button onclick="logout()">Выйти</button>
     </div>
     <div class="container">
+        <div id="alert" class="alert"></div>
+        
         <div class="tabs">
             <button class="tab active" onclick="showTab('dashboard')">📊 Дашборд</button>
             <button class="tab" onclick="showTab('products')">📦 Продукты</button>
@@ -274,7 +336,7 @@
                 <h2>Добавить продукт</h2>
                 <form id="productForm" onsubmit="createProduct(event)">
                     <div class="form-group">
-                        <label>Slug (уникальный идентификатор)</label>
+                        <label>Slug (уникальный идентификатор, используется в API)</label>
                         <input type="text" id="product-slug" required placeholder="например: Sc12345">
                     </div>
                     <div class="form-group">
@@ -288,6 +350,7 @@
                     <button type="submit" class="btn">Создать продукт</button>
                 </form>
             </div>
+            
             <div class="card">
                 <h2>Список продуктов</h2>
                 <div id="products-list" class="loading">Загрузка...</div>
@@ -299,7 +362,7 @@
             <div class="card">
                 <h2>Сгенерировать ключи</h2>
                 <form id="keysForm" onsubmit="generateKeys(event)">
-                    <div class="form-row">
+                    <div class="form-row-3">
                         <div class="form-group">
                             <label>Продукт</label>
                             <select id="key-product" required></select>
@@ -367,6 +430,17 @@
         </div>
     </div>
 
+    <!-- Модальное окно для управления продуктом -->
+    <div id="productModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;">
+        <div style="background: white; border-radius: 12px; padding: 30px; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto;">
+            <h2 id="modal-title" style="margin-bottom: 20px;">Управление продуктом</h2>
+            <div id="modal-content"></div>
+            <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: flex-end;">
+                <button class="btn btn-danger" onclick="closeProductModal()">Закрыть</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         const API_BASE = '';
         let adminToken = localStorage.getItem('admin_token');
@@ -375,12 +449,26 @@
             window.location.href = '/admin/login';
         }
 
+        function showAlert(message, type = 'success') {
+            const alertDiv = document.getElementById('alert');
+            alertDiv.className = `alert alert-${type} show`;
+            alertDiv.textContent = message;
+            setTimeout(() => {
+                alertDiv.classList.remove('show');
+            }, 5000);
+        }
+
         async function apiCall(endpoint, options = {}) {
             const headers = {
                 'Authorization': `Bearer ${adminToken}`,
                 'Content-Type': 'application/json',
                 ...options.headers
             };
+            
+            // Убираем Content-Type для form-data
+            if (options.body instanceof FormData) {
+                delete headers['Content-Type'];
+            }
             
             const response = await fetch(`${API_BASE}${endpoint}`, {
                 ...options,
@@ -449,6 +537,7 @@
                                 <th>Название</th>
                                 <th>Описание</th>
                                 <th>Статус</th>
+                                <th>Действия</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -459,6 +548,9 @@
                                     <td>${p.title}</td>
                                     <td>${p.description || '-'}</td>
                                     <td>${p.is_active ? '<span class="badge badge-success">Активен</span>' : '<span class="badge badge-danger">Неактивен</span>'}</td>
+                                    <td>
+                                        <button class="btn btn-small" onclick="manageProduct(${p.id})">Управление</button>
+                                    </td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -466,6 +558,130 @@
                 `;
             } catch (e) {
                 document.getElementById('products-list').innerHTML = '<p style="color: red;">Ошибка загрузки</p>';
+            }
+        }
+
+        async function manageProduct(productId) {
+            try {
+                const [product, prices, builds] = await Promise.all([
+                    apiCall(`/admin/products`).then(r => r.json()).then(ps => ps.find(p => p.id === productId)),
+                    apiCall(`/admin/products/${productId}/prices`).then(r => r.json()).catch(() => []),
+                    apiCall(`/admin/builds/${productId}`).then(r => r.json()).catch(() => [])
+                ]);
+                
+                const modal = document.getElementById('productModal');
+                const modalTitle = document.getElementById('modal-title');
+                const modalContent = document.getElementById('modal-content');
+                
+                modalTitle.textContent = `Управление: ${product.title}`;
+                modalContent.innerHTML = `
+                    <div>
+                        <h3>Цены продукта</h3>
+                        <div id="prices-list-${productId}">
+                            ${prices.length > 0 ? prices.map(p => `
+                                <div class="price-item">
+                                    <span>${p.duration_days} дней - ${p.price_rub}₽</span>
+                                </div>
+                            `).join('') : '<p>Нет цен</p>'}
+                        </div>
+                        <form onsubmit="addPrice(event, ${productId})">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Длительность (дней)</label>
+                                    <input type="number" id="price-duration-${productId}" required min="1" placeholder="1, 7, 14, 30, 90">
+                                </div>
+                                <div class="form-group">
+                                    <label>Цена (рублей)</label>
+                                    <input type="number" id="price-amount-${productId}" required min="0" step="0.01">
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-small">Добавить цену</button>
+                        </form>
+                    </div>
+                    
+                    <div style="margin-top: 30px;">
+                        <h3>Билды продукта</h3>
+                        <div id="builds-list-${productId}">
+                            ${builds.length > 0 ? builds.map(b => `
+                                <div class="build-item">
+                                    <span>${b.label} - ${b.file_path}</span>
+                                    <span class="badge ${b.is_active ? 'badge-success' : 'badge-danger'}">${b.is_active ? 'Активен' : 'Неактивен'}</span>
+                                </div>
+                            `).join('') : '<p>Нет билдов</p>'}
+                        </div>
+                        <form onsubmit="uploadBuild(event, ${productId})" enctype="multipart/form-data">
+                            <div class="form-group">
+                                <label>Название билда</label>
+                                <input type="text" id="build-label-${productId}" required placeholder="например: v1.0.0">
+                            </div>
+                            <div class="form-group">
+                                <label>ZIP файл</label>
+                                <input type="file" id="build-file-${productId}" required accept=".zip">
+                            </div>
+                            <button type="submit" class="btn btn-small">Загрузить билд</button>
+                        </form>
+                    </div>
+                `;
+                
+                modal.style.display = 'flex';
+            } catch (e) {
+                console.error(e);
+                showAlert('Ошибка загрузки данных продукта', 'error');
+            }
+        }
+
+        function closeProductModal() {
+            document.getElementById('productModal').style.display = 'none';
+        }
+
+        async function addPrice(e, productId) {
+            e.preventDefault();
+            const data = {
+                duration_days: parseInt(document.getElementById(`price-duration-${productId}`).value),
+                price_rub: parseFloat(document.getElementById(`price-amount-${productId}`).value)
+            };
+            
+            try {
+                const response = await apiCall(`/admin/products/${productId}/prices`, {
+                    method: 'POST',
+                    body: JSON.stringify(data)
+                });
+                
+                if (response.ok) {
+                    showAlert('Цена добавлена!');
+                    manageProduct(productId);
+                } else {
+                    const error = await response.json();
+                    showAlert('Ошибка: ' + (error.detail || 'Неизвестная ошибка'), 'error');
+                }
+            } catch (e) {
+                showAlert('Ошибка добавления цены', 'error');
+            }
+        }
+
+        async function uploadBuild(e, productId) {
+            e.preventDefault();
+            const formData = new FormData();
+            formData.append('file', document.getElementById(`build-file-${productId}`).files[0]);
+            const label = document.getElementById(`build-label-${productId}`).value;
+            
+            try {
+                const response = await apiCall(`/admin/builds/${productId}?label=${encodeURIComponent(label)}`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (response.ok) {
+                    showAlert('Билд загружен!');
+                    document.getElementById(`build-file-${productId}`).value = '';
+                    document.getElementById(`build-label-${productId}`).value = '';
+                    manageProduct(productId);
+                } else {
+                    const error = await response.json();
+                    showAlert('Ошибка: ' + (error.detail || 'Неизвестная ошибка'), 'error');
+                }
+            } catch (e) {
+                showAlert('Ошибка загрузки билда', 'error');
             }
         }
 
@@ -484,16 +700,16 @@
                 });
                 
                 if (response.ok) {
-                    alert('Продукт создан!');
+                    showAlert('Продукт создан!');
                     document.getElementById('productForm').reset();
                     loadProducts();
                     loadDashboard();
                 } else {
                     const error = await response.json();
-                    alert('Ошибка: ' + (error.detail || 'Неизвестная ошибка'));
+                    showAlert('Ошибка: ' + (error.detail || 'Неизвестная ошибка'), 'error');
                 }
             } catch (e) {
-                alert('Ошибка создания продукта');
+                showAlert('Ошибка создания продукта', 'error');
             }
         }
 
@@ -525,16 +741,16 @@
                 
                 if (response.ok) {
                     const keys = await response.json();
-                    alert(`Сгенерировано ${keys.length} ключей!`);
+                    showAlert(`Сгенерировано ${keys.length} ключей!`);
                     document.getElementById('keysForm').reset();
                     loadKeys();
                     loadDashboard();
                 } else {
                     const error = await response.json();
-                    alert('Ошибка: ' + (error.detail || 'Неизвестная ошибка'));
+                    showAlert('Ошибка: ' + (error.detail || 'Неизвестная ошибка'), 'error');
                 }
             } catch (e) {
-                alert('Ошибка генерации ключей');
+                showAlert('Ошибка генерации ключей', 'error');
             }
         }
 
@@ -613,14 +829,14 @@
                 });
                 
                 if (response.ok) {
-                    alert('Настройки сохранены!');
+                    showAlert('Настройки сохранены!');
                     loadDashboard();
                 } else {
                     const error = await response.json();
-                    alert('Ошибка: ' + (error.detail || 'Неизвестная ошибка'));
+                    showAlert('Ошибка: ' + (error.detail || 'Неизвестная ошибка'), 'error');
                 }
             } catch (e) {
-                alert('Ошибка сохранения настроек');
+                showAlert('Ошибка сохранения настроек', 'error');
             }
         }
 
@@ -669,9 +885,15 @@
             window.location.href = '/admin/login';
         }
 
+        // Закрытие модального окна при клике вне его
+        document.getElementById('productModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeProductModal();
+            }
+        });
+
         // Загружаем дашборд при старте
         loadDashboard();
     </script>
 </body>
 </html>
-

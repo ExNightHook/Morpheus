@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from fastapi.responses import HTMLResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
@@ -33,8 +33,8 @@ def login_page():
 
 
 @router.get("/panel", response_class=HTMLResponse)
-def admin_panel_page(_: AdminUser = Depends(get_current_admin)):
-    """Главная страница админ-панели"""
+def admin_panel_page():
+    """Главная страница админ-панели (без авторизации, проверка на клиенте)"""
     template_path = os.path.join(os.path.dirname(__file__), "..", "templates", "admin_panel.html")
     with open(template_path, "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
@@ -67,6 +67,20 @@ def create_product(data: schemas.ProductCreate, db: Session = Depends(get_db), _
     return product
 
 
+@router.get("/products/{product_id}/prices", response_model=List[schemas.ProductPriceOut])
+def list_prices(
+    product_id: int,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    """Список цен продукта"""
+    product = db.query(Product).filter_by(id=product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    prices = db.query(ProductPrice).filter_by(product_id=product_id).all()
+    return prices
+
+
 @router.post("/products/{product_id}/prices", response_model=schemas.ProductPriceOut)
 def add_price(
     product_id: int,
@@ -77,6 +91,12 @@ def add_price(
     product = db.query(Product).filter_by(id=product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
+    # Проверяем, нет ли уже цены с такой длительностью
+    existing = db.query(ProductPrice).filter_by(
+        product_id=product_id, duration_days=payload.duration_days
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Price for this duration already exists")
     price = ProductPrice(
         product_id=product.id,
         duration_days=payload.duration_days,
@@ -88,17 +108,38 @@ def add_price(
     return price
 
 
+@router.get("/builds/{product_id}", response_model=List[schemas.BuildOut])
+def list_builds(
+    product_id: int,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    """Список билдов продукта"""
+    product = db.query(Product).filter_by(id=product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    builds = db.query(Build).filter_by(product_id=product_id).all()
+    return builds
+
+
 @router.post("/builds/{product_id}", response_model=schemas.BuildOut)
 def upload_build(
     product_id: int,
-    label: str,
+    label: str = Query(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     _: AdminUser = Depends(get_current_admin),
 ):
+    product = db.query(Product).filter_by(id=product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
     uploads_dir = "/app/uploads"
     os.makedirs(uploads_dir, exist_ok=True)
-    file_path = os.path.join(uploads_dir, file.filename)
+    # Сохраняем файл с уникальным именем
+    import uuid
+    file_ext = os.path.splitext(file.filename)[1] or ".zip"
+    unique_filename = f"{product.slug}_{label}_{uuid.uuid4().hex[:8]}{file_ext}"
+    file_path = os.path.join(uploads_dir, unique_filename)
     with open(file_path, "wb") as f:
         f.write(file.file.read())
     build = Build(product_id=product_id, label=label, file_path=file_path)
