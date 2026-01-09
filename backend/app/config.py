@@ -1,5 +1,8 @@
+import logging
 from pydantic_settings import BaseSettings
 from pydantic import Field
+
+logger = logging.getLogger("morpheus.config")
 
 
 class Settings(BaseSettings):
@@ -35,3 +38,6 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
+# Логируем загруженные настройки (без секретных данных)
+logger.debug(f"Loaded settings: POSTGRES_HOST={settings.postgres_host}, PUBLIC_BASE_URL={settings.public_base_url}")
+logger.debug(f"TELEGRAM_BOT_TOKEN length: {len(settings.telegram_bot_token)}, first 10 chars: {settings.telegram_bot_token[:10] if settings.telegram_bot_token else 'EMPTY'}...")

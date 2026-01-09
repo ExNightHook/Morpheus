@@ -29,9 +29,19 @@ from app.security import get_password_hash
 class BotService:
     def __init__(self):
         token = settings.telegram_bot_token.strip() if settings.telegram_bot_token else ""
+        logger.info(f"Bot token length: {len(token)}, first 10 chars: {token[:10] if token else 'EMPTY'}...")
         if not token:
             raise ValueError("TELEGRAM_BOT_TOKEN is empty or not set in .env file")
-        self.bot = Bot(token, parse_mode="HTML")
+        # Проверяем формат токена (должен быть вида "число:строка")
+        if ":" not in token:
+            logger.error(f"Invalid token format: token should be 'BOT_ID:TOKEN', got: {token[:20]}...")
+            raise ValueError("TELEGRAM_BOT_TOKEN has invalid format (should be 'BOT_ID:TOKEN')")
+        try:
+            self.bot = Bot(token, parse_mode="HTML")
+            logger.info("Bot initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize bot with token: {token[:20]}... Error: {e}")
+            raise
         self.dp = Dispatcher()
         self.anypay = AnypayClient()
 
@@ -569,11 +579,27 @@ bot_service: Optional[BotService] = None
 async def run_bot():
     global bot_service
     try:
-        token = settings.telegram_bot_token.strip() if settings.telegram_bot_token else ""
+        import os
+        # Проверяем токен из переменных окружения напрямую
+        env_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+        settings_token = settings.telegram_bot_token.strip() if settings.telegram_bot_token else ""
+        
+        # Используем токен из переменных окружения, если он есть, иначе из settings
+        token = env_token if env_token else settings_token
+        
+        logger.info(f"Token check: env_token length={len(env_token)}, settings_token length={len(settings_token)}")
+        
         if not token:
-            logger.warning("TELEGRAM_BOT_TOKEN not set in .env file, bot will not start")
-            logger.warning("Please set TELEGRAM_BOT_TOKEN in /opt/Morpheus/.env file")
+            logger.warning("TELEGRAM_BOT_TOKEN not set, bot will not start")
+            logger.warning("Please set TELEGRAM_BOT_TOKEN in /opt/Morpheus/.env file and restart container")
             return
+        
+        # Проверяем формат токена
+        if ":" not in token:
+            logger.error(f"Invalid token format: token should be 'BOT_ID:TOKEN', got: {token[:20]}...")
+            logger.error("Please check TELEGRAM_BOT_TOKEN format in .env file")
+            return
+            
         bot_service = BotService()
         await bot_service.start()
     except ValueError as e:

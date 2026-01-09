@@ -37,7 +37,7 @@ services:
       ANYPAY_API_ID: ${ANYPAY_API_ID:-}
       ANYPAY_API_KEY: ${ANYPAY_API_KEY:-}
       ANYPAY_CURRENCY: ${ANYPAY_CURRENCY:-RUB}
-      ANYPAY_METHOD: ${ANYPAY_METHOD:-card}
+      ANYPAY_METHODS: ${ANYPAY_METHODS:-ym,btc,eth,qiwi}
       ANYPAY_SUCCESS_URL: ${ANYPAY_SUCCESS_URL:-http://localhost/success}
       ANYPAY_FAIL_URL: ${ANYPAY_FAIL_URL:-http://localhost/fail}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://localhost}
