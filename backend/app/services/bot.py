@@ -272,23 +272,51 @@ class BotService:
                 db.refresh(order)
 
                 desc = f"{product.title} {duration}d / user {user.telegram_id}"
+                resp = None
                 try:
                     resp = await self.anypay.create_payment(str(order.id), order.amount, desc)
-                    payment_url = resp["result"]["payment_url"]
+                    
+                    # Проверяем наличие обязательных полей в ответе
+                    if "result" not in resp:
+                        raise ValueError(f"Unexpected response format: {resp}")
+                    
+                    result = resp["result"]
+                    if "payment_url" not in result:
+                        raise ValueError(f"Payment URL not found in response: {result}")
+                    
+                    payment_url = result["payment_url"]
                     order.payment_url = payment_url
-                    order.provider_pay_id = str(resp["result"]["pay_id"])
+                    order.provider_pay_id = str(result.get("pay_id", order.id))
                     order.status = OrderStatus.waiting
                     # Только после успешного создания платежа меняем статус ключа
                     key.status = KeyStatus.sold
                     key.sold_at = datetime.utcnow()
                     key.sold_to_user_id = user.id
                     db.commit()
-                except Exception as e:
+                except KeyError as e:
+                    # При ошибке платежа - удаляем заказ и НЕ меняем статус ключа
+                    db.delete(order)
+                    db.commit()
+                    error_msg = f"Payment creation error - missing key {e}"
+                    if resp:
+                        error_msg += f": {resp}"
+                    logger.error(error_msg)
+                    await call.answer(f"Ошибка создания платежа: отсутствует поле {e}", show_alert=True)
+                    return
+                except ValueError as e:
                     # При ошибке платежа - удаляем заказ и НЕ меняем статус ключа
                     db.delete(order)
                     db.commit()
                     logger.error(f"Payment creation error: {e}")
-                    await call.answer(f"Ошибка создания платежа: {e}", show_alert=True)
+                    await call.answer(f"Ошибка создания платежа: {str(e)}", show_alert=True)
+                    return
+                except Exception as e:
+                    # При ошибке платежа - удаляем заказ и НЕ меняем статус ключа
+                    db.delete(order)
+                    db.commit()
+                    logger.error(f"Payment creation error: {e}", exc_info=True)
+                    error_message = str(e) if str(e) else "Неизвестная ошибка"
+                    await call.answer(f"Ошибка создания платежа: {error_message}", show_alert=True)
                     return
 
                 try:
