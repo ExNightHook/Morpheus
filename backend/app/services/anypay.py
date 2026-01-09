@@ -34,34 +34,22 @@ class AnypayClient:
         # Используем переданный метод или берем из настроек (метод в нижнем регистре)
         payment_method = (method or settings.anypay_methods.split(",")[0] if settings.anypay_methods else "ym").strip().lower()
         
-        # Определяем валюту в зависимости от метода оплаты
-        # Для криптовалютных методов валюта должна быть в соответствующей криптовалюте
-        crypto_methods = {
-            "btc": "BTC",
-            "eth": "ETH", 
-            "usdt": "USDT",
-            "ltc": "LTC",
-            "etc": "ETC",
-            "doge": "DOGE",
-            "trx": "TRX",
-            "xrp": "XRP",
-            "bch": "BCH",
-            "xmr": "XMR",
-            "ton": "TON",
-        }
-        
-        # Если метод оплаты - криптовалюта, используем её валюту
-        if payment_method in crypto_methods:
-            currency = crypto_methods[payment_method]
+        # В SCI все методы (включая криптовалютные) используют фиатные валюты
+        # Доступные валюты: RUB, UAH, BYN, KZT, USD, EUR
+        # Для метода ym (ЮMoney) валюта должна быть RUB
+        if payment_method == "ym":
+            currency = "RUB"  # ЮMoney работает только с RUB
         else:
-            # Для фиатных методов используем валюту из настроек
-            # Для метода ym (ЮMoney) валюта должна быть RUB
-            if payment_method == "ym":
-                currency = "RUB"  # ЮMoney работает только с RUB
-            else:
-                currency = settings.anypay_currency.upper().strip()
-                if not currency:
-                    currency = "RUB"  # По умолчанию RUB
+            # Для всех остальных методов используем валюту из настроек
+            currency = settings.anypay_currency.upper().strip()
+            if not currency:
+                currency = "RUB"  # По умолчанию RUB
+            
+            # Проверяем, что валюта валидна для SCI
+            valid_currencies = ["RUB", "UAH", "BYN", "KZT", "USD", "EUR"]
+            if currency not in valid_currencies:
+                logger.warning(f"Invalid currency {currency}, using RUB instead")
+                currency = "RUB"
         
         # Форматируем сумму с точкой как разделителем десятичных знаков
         amount_str = f"{amount:.2f}"
@@ -70,11 +58,13 @@ class AnypayClient:
         desc_trimmed = (desc or "")[:150]
         
         # Получаем URL для успешной и неуспешной оплаты
+        # Важно: если URL не заданы, используем пустые строки (как в документации)
         success_url = settings.anypay_success_url or ""
         fail_url = settings.anypay_fail_url or ""
         
         # Формируем подпись согласно документации SCI (SHA256 с разделителем :)
         # Порядок: merchant_id:pay_id:amount:currency:desc:success_url:fail_url:secret_key
+        # Все значения должны быть строками, пустые строки - это нормально
         sign_payload = ":".join([
             str(self.merchant_id),
             str(pay_id),
@@ -85,6 +75,8 @@ class AnypayClient:
             fail_url,
             self.secret_key
         ])
+        
+        logger.debug(f"Sign components: merchant_id={self.merchant_id}, pay_id={pay_id}, amount={amount_str}, currency={currency}, desc={desc_trimmed}, success_url={success_url}, fail_url={fail_url}")
         sign = hashlib.sha256(sign_payload.encode()).hexdigest()
         
         # Формируем параметры для URL
@@ -112,7 +104,9 @@ class AnypayClient:
         payment_url = f"{self.merchant_url}?{urllib.parse.urlencode(params)}"
         
         logger.info(f"Created SCI payment URL: pay_id={pay_id}, amount={amount_str}, currency={currency}, method={payment_method}")
+        logger.info(f"Payment URL: {payment_url}")
         logger.debug(f"Sign payload (without secret_key): {sign_payload.replace(self.secret_key, '***')}")
+        logger.debug(f"Merchant ID: {self.merchant_id}, Secret key length: {len(self.secret_key)}")
         
         return payment_url
 

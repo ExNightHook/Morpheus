@@ -447,7 +447,8 @@ class BotService:
 
                 desc = f"{product.title} {duration}d / user {user.telegram_id}"
                 try:
-                    # Создаем URL для оплаты через SCI
+                    # Создаем URL для оплаты через SCI (не API!)
+                    logger.info(f"Creating payment URL via SCI for order {order.id}, amount {order.amount}, method {method}")
                     payment_url = self.anypay.create_payment_url(
                         str(order.id), 
                         order.amount, 
@@ -455,6 +456,11 @@ class BotService:
                         email=f"user_{user.telegram_id}@morpheus.local",
                         method=method.lower()
                     )
+                    
+                    if not payment_url or not payment_url.startswith("https://anypay.io/merchant"):
+                        raise ValueError(f"Invalid payment URL generated: {payment_url}")
+                    
+                    logger.info(f"Payment URL created successfully: {payment_url[:100]}...")
                     
                     order.payment_url = payment_url
                     order.provider_pay_id = str(order.id)  # Используем order.id как pay_id
@@ -464,19 +470,18 @@ class BotService:
                     key.sold_at = datetime.utcnow()
                     key.sold_to_user_id = user.id
                     db.commit()
+                    logger.info(f"Order {order.id} created successfully, key {key.id} marked as sold")
                 except Exception as e:
                     # При ошибке платежа - удаляем заказ и НЕ меняем статус ключа
-                    db.delete(order)
-                    db.commit()
-                    logger.error(f"Payment creation error: {e}")
-                    await call.answer(f"Ошибка создания платежа: {str(e)}", show_alert=True)
-                    return
-                except Exception as e:
-                    # При ошибке платежа - удаляем заказ и НЕ меняем статус ключа
-                    db.delete(order)
-                    db.commit()
-                    logger.error(f"Payment creation error: {e}", exc_info=True)
+                    db.rollback()
+                    if order.id:
+                        db.delete(order)
+                        db.commit()
+                    logger.error(f"Payment creation error for order {order.id}: {e}", exc_info=True)
                     error_message = str(e) if str(e) else "Неизвестная ошибка"
+                    # Убираем упоминание "Anypay API error" из сообщения, так как мы используем SCI
+                    if "Anypay API error" in error_message:
+                        error_message = "Ошибка создания платежа. Попробуйте позже или выберите другой метод оплаты."
                     await call.answer(f"Ошибка создания платежа: {error_message}", show_alert=True)
                     return
 
