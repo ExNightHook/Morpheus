@@ -21,7 +21,8 @@ class AnypayClient:
     def __init__(self):
         self.merchant_id = settings.anypay_project_id
         # Для SCI используем отдельный secret_key, если задан, иначе API_KEY
-        self.secret_key = settings.anypay_secret_key or settings.anypay_api_key
+        # Используем getattr для безопасного доступа к полю
+        self.secret_key = getattr(settings, 'anypay_secret_key', None) or settings.anypay_api_key
         if not self.secret_key:
             logger.error("Anypay secret key not configured! Set ANYPAY_SECRET_KEY or ANYPAY_API_KEY in .env")
 
@@ -84,7 +85,7 @@ class AnypayClient:
         ])
         
         # Выбираем алгоритм подписи (SHA256 или MD5)
-        sign_algorithm = settings.anypay_sign_algorithm.lower().strip()
+        sign_algorithm = getattr(settings, 'anypay_sign_algorithm', 'sha256').lower().strip()
         
         if sign_algorithm == "md5":
             # MD5 порядок: currency:amount:secret_key:merchant_id:pay_id
