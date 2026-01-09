@@ -1,5 +1,5 @@
 import hashlib
-import httpx
+import urllib.parse
 import logging
 from app.config import settings
 
@@ -7,24 +7,29 @@ logger = logging.getLogger("morpheus.anypay")
 
 
 class AnypayClient:
-    base_url = "https://anypay.io/api"
+    """Клиент для работы с Anypay через SCI (Simple Checkout Interface)"""
+    
+    merchant_url = "https://anypay.io/merchant"
+    
+    # IP адреса Anypay для проверки webhook
+    ANYPAY_IPS = [
+        "185.162.128.38",
+        "185.162.128.39", 
+        "185.162.128.88"
+    ]
 
     def __init__(self):
-        self.project_id = settings.anypay_project_id
-        self.api_id = settings.anypay_api_id
-        self.api_key = settings.anypay_api_key
+        self.merchant_id = settings.anypay_project_id
+        self.secret_key = settings.anypay_api_key  # Используем API_KEY как secret_key для SCI
 
-    def _sign(self, action: str, *args) -> str:
-        """Формирует подпись для запроса к Anypay API."""
-        payload = action + "".join(str(arg) for arg in args) + self.api_key
-        return hashlib.sha256(payload.encode()).hexdigest()
-
-    async def create_payment(self, pay_id: str, amount: float, desc: str, email: str = "client@example.com", method: str = None):
+    def create_payment_url(self, pay_id: str, amount: float, desc: str, email: str = "client@example.com", method: str = None):
         """
-        Создает платеж в Anypay.
+        Создает URL для оплаты через SCI (Simple Checkout Interface).
         
-        Подпись формируется как: 
-        hash('sha256', 'create-payment[API_ID][project_id][pay_id][amount][currency][desc][method][API_KEY]')
+        Подпись формируется как SHA256:
+        hash('sha256', 'merchant_id:pay_id:amount:currency:desc:success_url:fail_url:secret_key')
+        
+        Возвращает URL для редиректа пользователя на страницу оплаты.
         """
         # Используем переданный метод или берем из настроек (метод в нижнем регистре)
         payment_method = (method or settings.anypay_methods.split(",")[0] if settings.anypay_methods else "ym").strip().lower()
@@ -42,6 +47,7 @@ class AnypayClient:
             "xrp": "XRP",
             "bch": "BCH",
             "xmr": "XMR",
+            "ton": "TON",
         }
         
         # Если метод оплаты - криптовалюта, используем её валюту
@@ -54,101 +60,87 @@ class AnypayClient:
                 currency = "RUB"  # ЮMoney работает только с RUB
             else:
                 currency = settings.anypay_currency.upper().strip()
+                if not currency:
+                    currency = "RUB"  # По умолчанию RUB
         
         # Форматируем сумму с точкой как разделителем десятичных знаков
         amount_str = f"{amount:.2f}"
         
         # Обрезаем описание до 150 символов
-        desc_trimmed = desc[:150]
+        desc_trimmed = (desc or "")[:150]
         
-        # Формируем подпись согласно документации (без разделителей между значениями)
-        sign_payload = (
-            "create-payment" +
-            str(self.api_id) +
-            str(self.project_id) +
-            str(pay_id) +
-            amount_str +
-            currency +
-            desc_trimmed +
-            payment_method
-        )
-        sign = hashlib.sha256((sign_payload + self.api_key).encode()).hexdigest()
+        # Получаем URL для успешной и неуспешной оплаты
+        success_url = settings.anypay_success_url or ""
+        fail_url = settings.anypay_fail_url or ""
         
-        # Формируем данные для запроса
-        data = {
-            "project_id": str(self.project_id),
+        # Формируем подпись согласно документации SCI (SHA256 с разделителем :)
+        # Порядок: merchant_id:pay_id:amount:currency:desc:success_url:fail_url:secret_key
+        sign_payload = ":".join([
+            str(self.merchant_id),
+            str(pay_id),
+            amount_str,
+            currency,
+            desc_trimmed,
+            success_url,
+            fail_url,
+            self.secret_key
+        ])
+        sign = hashlib.sha256(sign_payload.encode()).hexdigest()
+        
+        # Формируем параметры для URL
+        params = {
+            "merchant_id": str(self.merchant_id),
             "pay_id": str(pay_id),
             "amount": amount_str,
             "currency": currency,
-            "desc": desc_trimmed,
-            "email": email,
-            "method": payment_method,
             "sign": sign,
         }
         
-        # Добавляем method_currency для методов, которые его требуют
-        # Согласно документации: card (RUB, UAH, BYN, KZT), wm (USD, EUR), advcash (RUB, USD, EUR), pm (USD, EUR)
-        method_currency_map = {
-            "card": settings.anypay_currency.upper().strip(),  # RUB, UAH, BYN, KZT
-            "wm": "USD",  # или EUR
-            "advcash": settings.anypay_currency.upper().strip(),  # RUB, USD, EUR
-            "pm": "USD",  # или EUR
-            "ym": settings.anypay_currency.upper().strip(),  # Предполагаем RUB для ЮMoney
-        }
+        # Добавляем опциональные параметры
+        if desc_trimmed:
+            params["desc"] = desc_trimmed
+        if email:
+            params["email"] = email
+        if payment_method:
+            params["method"] = payment_method
+        if success_url:
+            params["success_url"] = success_url
+        if fail_url:
+            params["fail_url"] = fail_url
         
-        if payment_method in method_currency_map:
-            data["method_currency"] = method_currency_map[payment_method]
+        # Формируем URL
+        payment_url = f"{self.merchant_url}?{urllib.parse.urlencode(params)}"
         
-        # Добавляем опциональные параметры, если они заданы
-        if settings.anypay_success_url:
-            data["success_url"] = settings.anypay_success_url
-        if settings.anypay_fail_url:
-            data["fail_url"] = settings.anypay_fail_url
+        logger.info(f"Created SCI payment URL: pay_id={pay_id}, amount={amount_str}, currency={currency}, method={payment_method}")
+        logger.debug(f"Sign payload (without secret_key): {sign_payload.replace(self.secret_key, '***')}")
         
-        # Логируем запрос для отладки (без секретных данных)
-        logger.error(f"[ANYPAY DEBUG] Creating payment: pay_id={pay_id}, amount={amount_str}, currency={currency}, method={payment_method}")
-        logger.error(f"[ANYPAY DEBUG] Sign payload (without API_KEY): {sign_payload}")
-        logger.error(f"[ANYPAY DEBUG] Request data keys: {list(data.keys())}")
-        logger.error(f"[ANYPAY DEBUG] project_id={self.project_id}, api_id={self.api_id}")
-        
-        async with httpx.AsyncClient() as client:
-            try:
-                resp = await client.post(
-                    f"{self.base_url}/create-payment/{self.api_id}",
-                    data=data,
-                    timeout=20,
-                    headers={
-                        "Accept": "application/json",
-                    }
-                )
-                resp.raise_for_status()
-                result = resp.json()
-                
-                # Логируем ответ для отладки
-                logger.error(f"[ANYPAY DEBUG] Anypay response: {result}")
-                
-                # Проверяем наличие ошибки в ответе
-                if "error" in result:
-                    error_code = result["error"].get("code", "unknown")
-                    error_message = result["error"].get("message", "Unknown error")
-                    logger.error(f"Anypay API error {error_code}: {error_message}")
-                    logger.error(f"Request was: currency={currency}, method={payment_method}, amount={amount_str}, pay_id={pay_id}")
-                    raise ValueError(f"Anypay API error {error_code}: {error_message}")
-                
-                # Проверяем наличие результата
-                if "result" not in result:
-                    logger.error(f"Unexpected response format: {result}")
-                    raise ValueError(f"Unexpected response format: {result}")
-                
-                return result
-            except httpx.HTTPStatusError as e:
-                logger.error(f"HTTP error {e.response.status_code}: {e.response.text}")
-                raise
-            except Exception as e:
-                logger.error(f"Error creating payment: {e}", exc_info=True)
-                raise
+        return payment_url
 
-    def verify_webhook(self, action: str, sign: str) -> bool:
-        expected = self._sign(action, self.api_id)
-        return expected == sign
+    def verify_webhook_signature(self, currency: str, amount: str, pay_id: str, merchant_id: str, status: str, sign: str) -> bool:
+        """
+        Проверяет подпись webhook от Anypay (SCI).
+        
+        Подпись формируется как SHA256:
+        hash('sha256', 'currency:amount:pay_id:merchant_id:status:secret_key')
+        """
+        # Формируем подпись согласно документации SCI
+        sign_payload = ":".join([
+            str(currency),
+            str(amount),
+            str(pay_id),
+            str(merchant_id),
+            str(status),
+            self.secret_key
+        ])
+        expected_sign = hashlib.sha256(sign_payload.encode()).hexdigest()
+        
+        is_valid = expected_sign == sign
+        if not is_valid:
+            logger.warning(f"Invalid webhook signature. Expected: {expected_sign}, Got: {sign}")
+            logger.debug(f"Sign payload (without secret_key): {sign_payload.replace(self.secret_key, '***')}")
+        
+        return is_valid
 
+    def verify_webhook_ip(self, ip: str) -> bool:
+        """Проверяет, что IP адрес принадлежит Anypay"""
+        return ip in self.ANYPAY_IPS
