@@ -20,7 +20,10 @@ class AnypayClient:
 
     def __init__(self):
         self.merchant_id = settings.anypay_project_id
-        self.secret_key = settings.anypay_api_key  # Используем API_KEY как secret_key для SCI
+        # Для SCI используем отдельный secret_key, если задан, иначе API_KEY
+        self.secret_key = settings.anypay_secret_key or settings.anypay_api_key
+        if not self.secret_key:
+            logger.error("Anypay secret key not configured! Set ANYPAY_SECRET_KEY or ANYPAY_API_KEY in .env")
 
     def create_payment_url(self, pay_id: str, amount: float, desc: str, email: str = "client@example.com", method: str = None):
         """
@@ -62,10 +65,14 @@ class AnypayClient:
         success_url = settings.anypay_success_url or ""
         fail_url = settings.anypay_fail_url or ""
         
-        # Формируем подпись согласно документации SCI (SHA256 с разделителем :)
-        # Порядок: merchant_id:pay_id:amount:currency:desc:success_url:fail_url:secret_key
-        # Все значения должны быть строками, пустые строки - это нормально
-        sign_payload = ":".join([
+        # Формируем подпись согласно документации SCI
+        # В документации есть два варианта:
+        # 1. MD5: currency:amount:secret_key:merchant_id:pay_id
+        # 2. SHA256: merchant_id:pay_id:amount:currency:desc:success_url:fail_url:secret_key
+        # Используем SHA256 (более безопасный и современный)
+        
+        # SHA256 подпись (рекомендуется)
+        sign_payload_sha256 = ":".join([
             str(self.merchant_id),
             str(pay_id),
             amount_str,
@@ -76,8 +83,29 @@ class AnypayClient:
             self.secret_key
         ])
         
+        # Выбираем алгоритм подписи (SHA256 или MD5)
+        sign_algorithm = settings.anypay_sign_algorithm.lower().strip()
+        
+        if sign_algorithm == "md5":
+            # MD5 порядок: currency:amount:secret_key:merchant_id:pay_id
+            sign_payload = ":".join([
+                currency,
+                amount_str,
+                self.secret_key,
+                str(self.merchant_id),
+                str(pay_id)
+            ])
+            sign = hashlib.md5(sign_payload.encode()).hexdigest()
+            logger.info(f"Using MD5 algorithm for signature")
+        else:
+            # SHA256 порядок: merchant_id:pay_id:amount:currency:desc:success_url:fail_url:secret_key
+            sign_payload = sign_payload_sha256
+            sign = hashlib.sha256(sign_payload.encode()).hexdigest()
+            logger.info(f"Using SHA256 algorithm for signature")
+        
         logger.debug(f"Sign components: merchant_id={self.merchant_id}, pay_id={pay_id}, amount={amount_str}, currency={currency}, desc={desc_trimmed}, success_url={success_url}, fail_url={fail_url}")
-        sign = hashlib.sha256(sign_payload.encode()).hexdigest()
+        logger.debug(f"Full sign payload (before hash): {sign_payload.replace(self.secret_key, '***SECRET_KEY***')}")
+        logger.info(f"Generated {sign_algorithm.upper()} sign: {sign}")
         
         # Формируем параметры для URL
         params = {
