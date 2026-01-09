@@ -26,9 +26,9 @@ class AnypayClient:
         Подпись формируется как: 
         hash('sha256', 'create-payment[API_ID][project_id][pay_id][amount][currency][desc][method][API_KEY]')
         """
-        # Приводим валюту и метод к нижнему регистру
-        currency = settings.anypay_currency.lower()
-        # Используем переданный метод или берем из настроек
+        # Приводим валюту к верхнему регистру (Anypay требует RUB, USD, EUR и т.д.)
+        currency = settings.anypay_currency.upper().strip()
+        # Используем переданный метод или берем из настроек (метод в нижнем регистре)
         payment_method = (method or settings.anypay_methods.split(",")[0] if settings.anypay_methods else "ym").strip().lower()
         
         # Форматируем сумму с точкой как разделителем десятичных знаков
@@ -69,8 +69,9 @@ class AnypayClient:
             data["fail_url"] = settings.anypay_fail_url
         
         # Логируем запрос для отладки (без секретных данных)
-        logger.debug(f"Creating payment: pay_id={pay_id}, amount={amount_str}, currency={currency}, method={method}")
+        logger.info(f"Creating payment: pay_id={pay_id}, amount={amount_str}, currency={currency}, method={payment_method}")
         logger.debug(f"Sign payload (without API_KEY): {sign_payload}")
+        logger.debug(f"Request data: project_id={self.project_id}, api_id={self.api_id}")
         
         async with httpx.AsyncClient() as client:
             try:
