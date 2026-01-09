@@ -23,7 +23,8 @@ class Settings(BaseSettings):
     anypay_api_id: str = Field("", env="ANYPAY_API_ID")
     anypay_api_key: str = Field("", env="ANYPAY_API_KEY")
     anypay_currency: str = Field("RUB", env="ANYPAY_CURRENCY")
-    anypay_method: str = Field("card", env="ANYPAY_METHOD")
+    # Список доступных методов оплаты, разделенных запятой (например: "ym,btc,eth,qiwi")
+    anypay_methods: str = Field("ym,btc,eth,qiwi", env="ANYPAY_METHODS")
     anypay_success_url: str = Field("http://localhost/success", env="ANYPAY_SUCCESS_URL")
     anypay_fail_url: str = Field("http://localhost/fail", env="ANYPAY_FAIL_URL")
 

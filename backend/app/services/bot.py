@@ -28,9 +28,10 @@ from app.security import get_password_hash
 
 class BotService:
     def __init__(self):
-        if not settings.telegram_bot_token:
-            raise ValueError("TELEGRAM_BOT_TOKEN is empty")
-        self.bot = Bot(settings.telegram_bot_token, parse_mode="HTML")
+        token = settings.telegram_bot_token.strip() if settings.telegram_bot_token else ""
+        if not token:
+            raise ValueError("TELEGRAM_BOT_TOKEN is empty or not set in .env file")
+        self.bot = Bot(token, parse_mode="HTML")
         self.dp = Dispatcher()
         self.anypay = AnypayClient()
 
@@ -217,8 +218,171 @@ class BotService:
                     await call.message.answer("Выберите продукт:", reply_markup=kb)
 
         @dp.callback_query(F.data.startswith("buy:"))
-        async def start_payment(call: CallbackQuery):
+        async def select_payment_method(call: CallbackQuery):
+            """Шаг 1: Выбор метода оплаты"""
             _, slug, duration_str = call.data.split(":")
+            duration = int(duration_str)
+            with SessionLocal() as db:
+                settings_obj = await self._get_settings(db)
+                if not settings_obj.bot_enabled:
+                    await call.answer("Бот отключен", show_alert=True)
+                    return
+                if settings_obj.maintenance_mode:
+                    await call.answer("Технические работы", show_alert=True)
+                    return
+                user = db.query(User).filter_by(telegram_id=call.from_user.id).first()
+                if not user:
+                    await call.answer("Перезапустите /start", show_alert=True)
+                    return
+                product = db.query(Product).filter_by(slug=slug).first()
+                if not product:
+                    await call.answer("Товар не найден", show_alert=True)
+                    return
+                price = (
+                    db.query(ProductPrice)
+                    .filter_by(product_id=product.id, duration_days=duration)
+                    .first()
+                )
+                if not price:
+                    await call.answer("Нет цены для выбранной длительности", show_alert=True)
+                    return
+                key = (
+                    db.query(Key)
+                    .filter(
+                        Key.product_id == product.id,
+                        Key.duration_days == duration,
+                        Key.status == KeyStatus.available,
+                    )
+                    .first()
+                )
+                if not key:
+                    await call.answer("Ключи закончились", show_alert=True)
+                    return
+                
+                # Получаем доступные методы оплаты
+                methods_str = settings.anypay_methods or "ym,btc,eth,qiwi"
+                available_methods = [m.strip().lower() for m in methods_str.split(",") if m.strip()]
+                
+                # Названия методов для отображения
+                method_names = {
+                    "ym": "💳 ЮMoney",
+                    "btc": "₿ Bitcoin",
+                    "eth": "Ξ Ethereum",
+                    "qiwi": "💸 Qiwi",
+                    "card": "💳 Банковская карта",
+                    "sbp": "📱 СБП",
+                    "usdt": "💵 USDT",
+                    "ltc": "Ł Litecoin",
+                }
+                
+                buttons = []
+                for method in available_methods:
+                    method_display = method_names.get(method, method.upper())
+                    buttons.append(
+                        InlineKeyboardButton(
+                            text=method_display,
+                            callback_data=f"method:{slug}:{duration}:{method}"
+                        )
+                    )
+                
+                # Группируем кнопки по 2 в ряд
+                keyboard = []
+                for i in range(0, len(buttons), 2):
+                    row = buttons[i:i+2]
+                    keyboard.append(row)
+                keyboard.append([InlineKeyboardButton(text="↩️ Назад", callback_data=f"product:{slug}")])
+                
+                text = (
+                    f"<b>{product.title}</b>\n\n"
+                    f"📅 Срок: {duration} дней\n"
+                    f"💰 Сумма: {int(price.price_rub)}₽\n\n"
+                    f"Выберите метод оплаты:"
+                )
+                
+                try:
+                    await call.message.edit_text(
+                        text,
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+                    )
+                except Exception as e:
+                    logger.error(f"Error editing message: {e}")
+                    await call.message.answer(
+                        text,
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+                    )
+
+        @dp.callback_query(F.data.startswith("method:"))
+        async def confirm_payment(call: CallbackQuery):
+            """Шаг 2: Подтверждение покупки"""
+            _, slug, duration_str, method = call.data.split(":")
+            duration = int(duration_str)
+            with SessionLocal() as db:
+                settings_obj = await self._get_settings(db)
+                if not settings_obj.bot_enabled:
+                    await call.answer("Бот отключен", show_alert=True)
+                    return
+                if settings_obj.maintenance_mode:
+                    await call.answer("Технические работы", show_alert=True)
+                    return
+                user = db.query(User).filter_by(telegram_id=call.from_user.id).first()
+                if not user:
+                    await call.answer("Перезапустите /start", show_alert=True)
+                    return
+                product = db.query(Product).filter_by(slug=slug).first()
+                if not product:
+                    await call.answer("Товар не найден", show_alert=True)
+                    return
+                price = (
+                    db.query(ProductPrice)
+                    .filter_by(product_id=product.id, duration_days=duration)
+                    .first()
+                )
+                if not price:
+                    await call.answer("Нет цены для выбранной длительности", show_alert=True)
+                    return
+                
+                method_names = {
+                    "ym": "ЮMoney",
+                    "btc": "Bitcoin",
+                    "eth": "Ethereum",
+                    "qiwi": "Qiwi",
+                    "card": "Банковская карта",
+                    "sbp": "СБП",
+                    "usdt": "USDT",
+                    "ltc": "Litecoin",
+                }
+                method_display = method_names.get(method.lower(), method.upper())
+                
+                text = (
+                    f"<b>Подтверждение покупки</b>\n\n"
+                    f"📦 Товар: {product.title}\n"
+                    f"📅 Срок: {duration} дней\n"
+                    f"💰 Сумма: {int(price.price_rub)}₽\n"
+                    f"💳 Метод оплаты: {method_display}\n\n"
+                    f"Подтвердите покупку:"
+                )
+                
+                keyboard = [
+                    [InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"confirm:{slug}:{duration}:{method}")],
+                    [InlineKeyboardButton(text="❌ Отмена", callback_data=f"product:{slug}")]
+                ]
+                
+                try:
+                    await call.message.edit_text(
+                        text,
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+                    )
+                except Exception as e:
+                    logger.error(f"Error editing message: {e}")
+                    await call.message.answer(
+                        text,
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+                    )
+
+        @dp.callback_query(F.data.startswith("confirm:"))
+        async def create_payment(call: CallbackQuery):
+            """Шаг 3: Создание платежа"""
+            _, slug, duration_str, method = call.data.split(":")
             duration = int(duration_str)
             with SessionLocal() as db:
                 settings_obj = await self._get_settings(db)
@@ -274,7 +438,13 @@ class BotService:
                 desc = f"{product.title} {duration}d / user {user.telegram_id}"
                 resp = None
                 try:
-                    resp = await self.anypay.create_payment(str(order.id), order.amount, desc)
+                    resp = await self.anypay.create_payment(
+                        str(order.id), 
+                        order.amount, 
+                        desc,
+                        email=f"user_{user.telegram_id}@morpheus.local",
+                        method=method.lower()
+                    )
                     
                     # Проверяем наличие обязательных полей в ответе
                     if "result" not in resp:
@@ -321,19 +491,27 @@ class BotService:
 
                 try:
                     await call.message.edit_text(
-                        f"Подтвердите покупку <b>{product.title}</b> на {duration} дней за {int(order.amount)}₽.\n\n"
-                        f"Ссылка на оплату: {order.payment_url}\n\nПосле оплаты дождитесь сообщения с ключом.",
+                        f"✅ <b>Платеж создан!</b>\n\n"
+                        f"📦 Товар: {product.title}\n"
+                        f"📅 Срок: {duration} дней\n"
+                        f"💰 Сумма: {int(order.amount)}₽\n\n"
+                        f"Перейдите по ссылке для оплаты:\n{order.payment_url}\n\n"
+                        f"После успешной оплаты вы получите ключ и файл.",
                         reply_markup=InlineKeyboardMarkup(
-                            inline_keyboard=[[InlineKeyboardButton(text="Открыть оплату", url=order.payment_url)]]
+                            inline_keyboard=[[InlineKeyboardButton(text="💳 Перейти к оплате", url=order.payment_url)]]
                         ),
                     )
                 except Exception as e:
                     logger.error(f"Error editing payment message: {e}")
                     await call.message.answer(
-                        f"Подтвердите покупку <b>{product.title}</b> на {duration} дней за {int(order.amount)}₽.\n\n"
-                        f"Ссылка на оплату: {order.payment_url}\n\nПосле оплаты дождитесь сообщения с ключом.",
+                        f"✅ <b>Платеж создан!</b>\n\n"
+                        f"📦 Товар: {product.title}\n"
+                        f"📅 Срок: {duration} дней\n"
+                        f"💰 Сумма: {int(order.amount)}₽\n\n"
+                        f"Перейдите по ссылке для оплаты:\n{order.payment_url}\n\n"
+                        f"После успешной оплаты вы получите ключ и файл.",
                         reply_markup=InlineKeyboardMarkup(
-                            inline_keyboard=[[InlineKeyboardButton(text="Открыть оплату", url=order.payment_url)]]
+                            inline_keyboard=[[InlineKeyboardButton(text="💳 Перейти к оплате", url=order.payment_url)]]
                         ),
                     )
 
@@ -391,11 +569,16 @@ bot_service: Optional[BotService] = None
 async def run_bot():
     global bot_service
     try:
-        if not settings.telegram_bot_token:
-            logger.warning("TELEGRAM_BOT_TOKEN not set, bot will not start")
+        token = settings.telegram_bot_token.strip() if settings.telegram_bot_token else ""
+        if not token:
+            logger.warning("TELEGRAM_BOT_TOKEN not set in .env file, bot will not start")
+            logger.warning("Please set TELEGRAM_BOT_TOKEN in /opt/Morpheus/.env file")
             return
         bot_service = BotService()
         await bot_service.start()
+    except ValueError as e:
+        logger.error(f"Bot configuration error: {e}")
+        logger.error("Please check TELEGRAM_BOT_TOKEN in /opt/Morpheus/.env file")
     except Exception as e:
         logger.error(f"Bot error: {e}", exc_info=True)
 

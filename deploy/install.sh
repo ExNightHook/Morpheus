@@ -134,8 +134,21 @@ generate_certs
 write_nginx_conf
 start_stack
 
+# Install management script
+if [ -f "${PROJECT_ROOT}/morpheus" ]; then
+    cp "${PROJECT_ROOT}/morpheus" /usr/local/bin/morpheus
+    chmod +x /usr/local/bin/morpheus
+    echo "[*] Installed management script: morpheus"
+    echo "    Usage: sudo morpheus -help"
+fi
+
 echo ""
 echo "Installation complete."
 echo "Edit ${ENV_FILE} to set TELEGRAM_BOT_TOKEN and anypay keys, then run:"
 echo "  sudo docker compose restart api"
+echo ""
+echo "Management commands:"
+echo "  sudo morpheus -admin    # Show admin credentials"
+echo "  sudo morpheus -update   # Update from GitHub"
+echo "  sudo morpheus -restart  # Restart services"
 

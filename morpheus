@@ -1,0 +1,148 @@
+#!/bin/bash
+# Morpheus Management Script
+
+PROJECT_ROOT="/opt/Morpheus"
+ENV_FILE="$PROJECT_ROOT/.env"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# Check if running as root
+if [ "$EUID" -ne 0 ]; then 
+    echo -e "${RED}Please run as root (use sudo)${NC}"
+    exit 1
+fi
+
+# Check if project directory exists
+if [ ! -d "$PROJECT_ROOT" ]; then
+    echo -e "${RED}Project directory $PROJECT_ROOT not found!${NC}"
+    exit 1
+fi
+
+cd "$PROJECT_ROOT" || exit 1
+
+case "$1" in
+    -admin|--admin)
+        echo -e "${GREEN}=== Morpheus Admin Credentials ===${NC}"
+        if [ ! -f "$ENV_FILE" ]; then
+            echo -e "${RED}.env file not found at $ENV_FILE${NC}"
+            exit 1
+        fi
+        
+        # Get admin credentials from database
+        ADMIN_INFO=$(docker compose exec -T db psql -U morpheus -d morpheus -t -c "SELECT username, password_hash FROM admin_users LIMIT 1;" 2>/dev/null)
+        
+        if [ -z "$ADMIN_INFO" ] || [ "$ADMIN_INFO" = "" ]; then
+            echo -e "${YELLOW}No admin user found. Checking logs for auto-generated credentials...${NC}"
+            # Try to get from logs
+            docker compose logs api 2>/dev/null | grep -i "Generated admin credentials" | tail -1
+            echo -e "${YELLOW}If no credentials found, restart the API container to generate new admin user.${NC}"
+        else
+            echo "$ADMIN_INFO" | while IFS='|' read -r username password_hash; do
+                username=$(echo "$username" | xargs)
+                echo -e "${GREEN}Username: ${NC}$username"
+                echo -e "${YELLOW}Password hash: ${NC}$password_hash"
+                echo -e "${YELLOW}Note: Password is hashed. Check API logs for auto-generated password on first startup.${NC}"
+            done
+        fi
+        
+        # Also check API logs for generated password
+        echo -e "\n${GREEN}Checking API logs for auto-generated password...${NC}"
+        docker compose logs api 2>/dev/null | grep -i "Generated admin credentials" | tail -1 || echo "No auto-generated credentials found in logs"
+        ;;
+        
+    -update|--update)
+        echo -e "${GREEN}=== Updating Morpheus from GitHub ===${NC}"
+        
+        if [ ! -d "$PROJECT_ROOT/.git" ]; then
+            echo -e "${RED}Not a git repository! Cannot update.${NC}"
+            exit 1
+        fi
+        
+        echo -e "${YELLOW}Pulling latest changes from GitHub...${NC}"
+        git pull origin main || {
+            echo -e "${RED}Failed to pull from GitHub!${NC}"
+            exit 1
+        }
+        
+        echo -e "${YELLOW}Building API container...${NC}"
+        docker compose build api || {
+            echo -e "${RED}Failed to build API container!${NC}"
+            exit 1
+        }
+        
+        echo -e "${YELLOW}Restarting services...${NC}"
+        docker compose up -d || {
+            echo -e "${RED}Failed to restart services!${NC}"
+            exit 1
+        }
+        
+        echo -e "${GREEN}Update complete!${NC}"
+        echo -e "${YELLOW}Checking service status...${NC}"
+        docker compose ps
+        ;;
+        
+    -restart|--restart)
+        echo -e "${GREEN}=== Restarting Morpheus Services ===${NC}"
+        
+        echo -e "${YELLOW}Restarting all services...${NC}"
+        docker compose restart || {
+            echo -e "${RED}Failed to restart services!${NC}"
+            exit 1
+        }
+        
+        echo -e "${GREEN}Services restarted!${NC}"
+        echo -e "${YELLOW}Service status:${NC}"
+        docker compose ps
+        
+        echo -e "\n${YELLOW}Recent API logs:${NC}"
+        docker compose logs api --tail=20
+        ;;
+        
+    -status|--status)
+        echo -e "${GREEN}=== Morpheus Service Status ===${NC}"
+        docker compose ps
+        
+        echo -e "\n${GREEN}=== Recent API Logs ===${NC}"
+        docker compose logs api --tail=30
+        
+        echo -e "\n${GREEN}=== Database Status ===${NC}"
+        docker compose exec -T db pg_isready -U morpheus 2>/dev/null && echo "Database: OK" || echo "Database: ERROR"
+        ;;
+        
+    -logs|--logs)
+        SERVICE="${2:-api}"
+        LINES="${3:-50}"
+        echo -e "${GREEN}=== Logs for service: $SERVICE (last $LINES lines) ===${NC}"
+        docker compose logs "$SERVICE" --tail="$LINES" -f
+        ;;
+        
+    -help|--help|"")
+        echo -e "${GREEN}=== Morpheus Management Script ===${NC}"
+        echo ""
+        echo "Usage: morpheus [command]"
+        echo ""
+        echo "Commands:"
+        echo "  -admin, --admin          Show admin panel credentials"
+        echo "  -update, --update         Update from GitHub and rebuild"
+        echo "  -restart, --restart       Restart all services"
+        echo "  -status, --status         Show service status and logs"
+        echo "  -logs [service] [lines]   Show logs (default: api, 50 lines)"
+        echo "  -help, --help            Show this help message"
+        echo ""
+        echo "Examples:"
+        echo "  sudo morpheus -admin"
+        echo "  sudo morpheus -update"
+        echo "  sudo morpheus -restart"
+        echo "  sudo morpheus -logs api 100"
+        ;;
+        
+    *)
+        echo -e "${RED}Unknown command: $1${NC}"
+        echo "Use 'morpheus -help' for usage information"
+        exit 1
+        ;;
+esac

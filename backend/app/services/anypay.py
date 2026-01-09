@@ -19,7 +19,7 @@ class AnypayClient:
         payload = action + "".join(str(arg) for arg in args) + self.api_key
         return hashlib.sha256(payload.encode()).hexdigest()
 
-    async def create_payment(self, pay_id: str, amount: float, desc: str, email: str = "client@example.com"):
+    async def create_payment(self, pay_id: str, amount: float, desc: str, email: str = "client@example.com", method: str = None):
         """
         Создает платеж в Anypay.
         
@@ -28,7 +28,8 @@ class AnypayClient:
         """
         # Приводим валюту и метод к нижнему регистру
         currency = settings.anypay_currency.lower()
-        method = settings.anypay_method.lower()
+        # Используем переданный метод или берем из настроек
+        payment_method = (method or settings.anypay_methods.split(",")[0] if settings.anypay_methods else "ym").strip().lower()
         
         # Форматируем сумму с точкой как разделителем десятичных знаков
         amount_str = f"{amount:.2f}"
@@ -45,7 +46,7 @@ class AnypayClient:
             amount_str +
             currency +
             desc_trimmed +
-            method
+            payment_method
         )
         sign = hashlib.sha256((sign_payload + self.api_key).encode()).hexdigest()
         
@@ -57,7 +58,7 @@ class AnypayClient:
             "currency": currency,
             "desc": desc_trimmed,
             "email": email,
-            "method": method,
+            "method": payment_method,
             "sign": sign,
         }
         

@@ -86,3 +86,15 @@ def health():
 def panel_entry():
     return RedirectResponse(url="/admin/panel")
 
+
+@app.get("/success")
+def payment_success():
+    """Страница успешной оплаты"""
+    return {"status": "success", "message": "Payment successful"}
+
+
+@app.get("/fail")
+def payment_fail():
+    """Страница неуспешной оплаты"""
+    return {"status": "fail", "message": "Payment failed"}
+
