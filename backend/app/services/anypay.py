@@ -26,10 +26,30 @@ class AnypayClient:
         Подпись формируется как: 
         hash('sha256', 'create-payment[API_ID][project_id][pay_id][amount][currency][desc][method][API_KEY]')
         """
-        # Приводим валюту к верхнему регистру (Anypay требует RUB, USD, EUR и т.д.)
-        currency = settings.anypay_currency.upper().strip()
         # Используем переданный метод или берем из настроек (метод в нижнем регистре)
         payment_method = (method or settings.anypay_methods.split(",")[0] if settings.anypay_methods else "ym").strip().lower()
+        
+        # Определяем валюту в зависимости от метода оплаты
+        # Для криптовалютных методов валюта должна быть в соответствующей криптовалюте
+        crypto_methods = {
+            "btc": "BTC",
+            "eth": "ETH", 
+            "usdt": "USDT",
+            "ltc": "LTC",
+            "etc": "ETC",
+            "doge": "DOGE",
+            "trx": "TRX",
+            "xrp": "XRP",
+            "bch": "BCH",
+            "xmr": "XMR",
+        }
+        
+        # Если метод оплаты - криптовалюта, используем её валюту
+        if payment_method in crypto_methods:
+            currency = crypto_methods[payment_method]
+        else:
+            # Для фиатных методов используем валюту из настроек
+            currency = settings.anypay_currency.upper().strip()
         
         # Форматируем сумму с точкой как разделителем десятичных знаков
         amount_str = f"{amount:.2f}"
@@ -70,8 +90,8 @@ class AnypayClient:
         
         # Логируем запрос для отладки (без секретных данных)
         logger.info(f"Creating payment: pay_id={pay_id}, amount={amount_str}, currency={currency}, method={payment_method}")
-        logger.debug(f"Sign payload (without API_KEY): {sign_payload}")
-        logger.debug(f"Request data: project_id={self.project_id}, api_id={self.api_id}")
+        logger.info(f"Sign payload (without API_KEY): {sign_payload}")
+        logger.debug(f"Request data: project_id={self.project_id}, api_id={self.api_id}, full_data={dict((k, v) for k, v in data.items() if k != 'sign')}")
         
         async with httpx.AsyncClient() as client:
             try:
@@ -87,13 +107,14 @@ class AnypayClient:
                 result = resp.json()
                 
                 # Логируем ответ для отладки
-                logger.debug(f"Anypay response: {result}")
+                logger.info(f"Anypay response: {result}")
                 
                 # Проверяем наличие ошибки в ответе
                 if "error" in result:
                     error_code = result["error"].get("code", "unknown")
                     error_message = result["error"].get("message", "Unknown error")
                     logger.error(f"Anypay API error {error_code}: {error_message}")
+                    logger.error(f"Request was: currency={currency}, method={payment_method}, amount={amount_str}, pay_id={pay_id}")
                     raise ValueError(f"Anypay API error {error_code}: {error_message}")
                 
                 # Проверяем наличие результата
