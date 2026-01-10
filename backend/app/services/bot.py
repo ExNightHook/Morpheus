@@ -1,12 +1,9 @@
 import asyncio
 import logging
-from typing import Optional, Dict
+from typing import Optional
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
-from aiogram.filters import Command, StateFilter
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.filters import Command
 from sqlalchemy.orm import Session
 from datetime import datetime
 
@@ -29,12 +26,6 @@ from app.services.nicepay import NicepayClient
 from app.security import get_password_hash
 
 
-# Состояния для FSM (Finite State Machine)
-class PaymentStates(StatesGroup):
-    waiting_for_email = State()
-    confirming_payment = State()
-
-
 class BotService:
     def __init__(self):
         token = settings.telegram_bot_token.strip() if settings.telegram_bot_token else ""
@@ -47,17 +38,14 @@ class BotService:
             raise ValueError("TELEGRAM_BOT_TOKEN has invalid format (should be 'BOT_ID:TOKEN')")
         
         try:
-            # Используем MemoryStorage для FSM
-            storage = MemoryStorage()
             self.bot = Bot(token, parse_mode="HTML")
-            self.dp = Dispatcher(storage=storage)
-            logger.info("Bot initialized successfully with FSM support")
+            self.dp = Dispatcher()
+            logger.info("Bot initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize bot: {e}")
             raise
         
         self.nicepay = NicepayClient()
-        self.user_emails: Dict[int, str] = {}  # Кэш email пользователей
 
     async def _get_settings(self, db: Session) -> BotSettings:
         settings_obj = db.query(BotSettings).first()
@@ -103,8 +91,7 @@ class BotService:
         dp = self.dp
 
         @dp.message(Command(commands=["start", "help"]))
-        async def cmd_start(message: Message, state: FSMContext):
-            await state.clear()  # Очищаем состояние
+        async def cmd_start(message: Message):
             with SessionLocal() as db:
                 settings_obj = await self._get_settings(db)
                 if not settings_obj.bot_enabled:
@@ -124,8 +111,7 @@ class BotService:
                 )
 
         @dp.message(F.text == "📋 Каталог")
-        async def show_products(message: Message, state: FSMContext):
-            await state.clear()
+        async def show_products(message: Message):
             with SessionLocal() as db:
                 settings_obj = await self._get_settings(db)
                 if not settings_obj.bot_enabled:
@@ -153,8 +139,7 @@ class BotService:
                 await message.answer("Выберите продукт:", reply_markup=kb)
 
         @dp.callback_query(F.data.startswith("product:"))
-        async def product_details(call: CallbackQuery, state: FSMContext):
-            await state.clear()
+        async def product_details(call: CallbackQuery):
             slug = call.data.split(":")[1]
             with SessionLocal() as db:
                 settings_obj = await self._get_settings(db)
@@ -211,8 +196,7 @@ class BotService:
                     await call.message.answer(text, reply_markup=kb)
 
         @dp.callback_query(F.data == "back")
-        async def back_to_catalog(call: CallbackQuery, state: FSMContext):
-            await state.clear()
+        async def back_to_catalog(call: CallbackQuery):
             with SessionLocal() as db:
                 settings_obj = await self._get_settings(db)
                 if not settings_obj.bot_enabled:
@@ -245,16 +229,10 @@ class BotService:
                     await call.message.answer("Выберите продукт:", reply_markup=kb)
 
         @dp.callback_query(F.data.startswith("buy:"))
-        async def select_payment_method(call: CallbackQuery, state: FSMContext):
+        async def select_payment_method(call: CallbackQuery):
             """Шаг 1: Выбор метода оплаты"""
             _, slug, duration_str = call.data.split(":")
             duration = int(duration_str)
-            
-            # Сохраняем данные о выборе пользователя
-            await state.update_data(
-                product_slug=slug,
-                duration_days=duration
-            )
             
             with SessionLocal() as db:
                 settings_obj = await self._get_settings(db)
@@ -302,157 +280,85 @@ class BotService:
                     await call.answer("Минимальная сумма для оплаты составляет 200 рублей", show_alert=True)
                     return
                 
-                # Проверяем, есть ли сохраненный email у пользователя
-                user_email = self.user_emails.get(call.from_user.id)
+                # Получаем доступные методы оплаты
+                methods_str = settings.nicepay_methods or "sbp_rub"
+                available_methods = [m.strip().lower() for m in methods_str.split(",") if m.strip()]
                 
-                if user_email:
-                    # Email уже есть, переходим к выбору метода оплаты
-                    await show_payment_methods(call, state, product, price, user_email)
-                else:
-                    # Запрашиваем email
-                    await PaymentStates.waiting_for_email.set()
-                    text = (
-                        f"<b>{product.title}</b>\n\n"
-                        f"📅 Срок: {duration} дней\n"
-                        f"💰 Сумма: {int(price.price_rub)}₽\n\n"
-                        f"📧 Пожалуйста, укажите ваш email для связи:\n"
-                        f"(Этот email будет использован для связи в случае вопросов по оплате)"
+                # Названия методов для отображения
+                method_names = {
+                    # RUB методы
+                    "sbp_rub": "📱 СБП по QR",
+                    "sbp": "📱 СБП",
+                    "sberbank_rub": "🏦 Сбербанк на карту",
+                    "sberbank_account_rub": "🏦 Сбербанк по счёту",
+                    "tinkoff_rub": "🏦 Tinkoff",
+                    "alfabank_rub": "🏦 Альфа-Банк",
+                    "raiffeisen_rub": "🏦 Райффайзен",
+                    "vtb_rub": "🏦 ВТБ",
+                    "rnkbbank_rub": "🏦 РНКБ Банк",
+                    "postbank_rub": "🏦 Почта Банк",
+                    "yoomoney_rub": "💵 ЮMoney",
+                    "advcash_rub": "💵 AdvCash",
+                    "payeer_rub": "💵 Payeer",
+                    "unistream_rub": "🏦 UniStream",
+                    "rocketbank_rub": "🏦 Рокет Банк",
+                    "mobile_rub": "📱 Перевод на мобильную связь",
+                    "otpbank_rub": "🏦 ОТП Банк",
+                    "rsb_rub": "🏦 Россельхозбанк",
+                    "psb_rub": "🏦 Промсвязьбанк",
+                    "solidaritybank_rub": "🏦 Солидарность Банк",
+                    "card_tj_rub": "💳 По номеру карты (Таджикистан)",
+                    "card_kg_rub": "💳 По номеру карты (Кыргызстан)",
+                    "card_uz_rub": "💳 По номеру карты (Узбекистан)",
+                    # USD методы
+                    "paypal_usd": "💳 PayPal (USD)",
+                    "advcash_usd": "💵 AdvCash (USD)",
+                    "payeer_usd": "💵 Payeer (USD)",
+                    # EUR методы
+                    "paypal_eur": "💳 PayPal (EUR)",
+                    "advcash_eur": "💵 AdvCash (EUR)",
+                    "payeer_eur": "💵 Payeer (EUR)",
+                    # UAH методы
+                    "monobank_uah": "🏦 Monobank (UAH)",
+                    "privatbank_uah": "🏦 PrivatBank (UAH)",
+                    "raiffeisen_uah": "🏦 Raiffeisen (UAH)",
+                    # KZT методы
+                    "kaspibank_kzt": "🏦 Kaspi Bank (KZT)",
+                    "halykbank_kzt": "🏦 Halyk Bank (KZT)",
+                    "jysanbank_kzt": "🏦 Jysan Bank (KZT)",
+                    "centercreditbank_kzt": "🏦 CenterCredit Bank (KZT)",
+                    "fortebank_kzt": "🏦 ForteBank (KZT)",
+                    "advcash_kzt": "💵 AdvCash (KZT)",
+                    "berekebank_kzt": "🏦 Bereke Bank (KZT)",
+                    "homecreditbank_kzt": "🏦 Home Credit Bank (KZT)",
+                    # USDT
+                    "nicewallet_usdt": "💵 NiceWallet (USDT)",
+                }
+                
+                buttons = []
+                for method in available_methods:
+                    method_display = method_names.get(method, method.upper())
+                    buttons.append(
+                        InlineKeyboardButton(
+                            text=method_display,
+                            callback_data=f"method:{product.slug}:{price.duration_days}:{method}"
+                        )
                     )
-                    
-                    try:
-                        await call.message.edit_text(
-                            text,
-                            reply_markup=InlineKeyboardMarkup(
-                                inline_keyboard=[
-                                    [InlineKeyboardButton(text="↩️ Назад", callback_data=f"product:{slug}")]
-                                ]
-                            )
-                        )
-                    except Exception as e:
-                        logger.error(f"Error editing message: {e}")
-                        await call.message.answer(
-                            text,
-                            reply_markup=InlineKeyboardMarkup(
-                                inline_keyboard=[
-                                    [InlineKeyboardButton(text="↩️ Назад", callback_data=f"product:{slug}")]
-                                ]
-                            )
-                        )
-
-        @dp.message(StateFilter(PaymentStates.waiting_for_email))
-        async def process_email(message: Message, state: FSMContext):
-            """Обработка введенного email"""
-            email = message.text.strip()
-            
-            # Простая валидация email
-            if "@" not in email or "." not in email:
-                await message.answer("Пожалуйста, введите корректный email адрес. Пример: user@example.com")
-                return
-            
-            # Сохраняем email
-            self.user_emails[message.from_user.id] = email
-            
-            # Получаем сохраненные данные
-            data = await state.get_data()
-            product_slug = data.get("product_slug")
-            duration_days = data.get("duration_days")
-            
-            with SessionLocal() as db:
-                product = db.query(Product).filter_by(slug=product_slug).first()
-                price = (
-                    db.query(ProductPrice)
-                    .filter_by(product_id=product.id, duration_days=duration_days)
-                    .first()
+                
+                # Группируем кнопки по 2 в ряд
+                keyboard = []
+                for i in range(0, len(buttons), 2):
+                    row = buttons[i:i+2]
+                    keyboard.append(row)
+                keyboard.append([InlineKeyboardButton(text="↩️ Назад", callback_data=f"product:{product.slug}")])
+                
+                text = (
+                    f"<b>{product.title}</b>\n\n"
+                    f"📅 Срок: {price.duration_days} дней\n"
+                    f"💰 Сумма: {int(price.price_rub)}₽\n\n"
+                    f"Выберите метод оплаты:"
                 )
                 
-                await show_payment_methods(None, state, product, price, email, message)
-
-        async def show_payment_methods(call: CallbackQuery, state: FSMContext, product: Product, price: ProductPrice, user_email: str, message: Message = None):
-            """Показать доступные методы оплаты"""
-            # Получаем доступные методы оплаты
-            methods_str = settings.nicepay_methods or "sbp_rub"
-            available_methods = [m.strip().lower() for m in methods_str.split(",") if m.strip()]
-            
-            # Названия методов для отображения
-            method_names = {
-                # RUB методы
-                "sbp_rub": "📱 СБП по QR",
-                "sbp": "📱 СБП",
-                "sberbank_rub": "🏦 Сбербанк на карту",
-                "sberbank_account_rub": "🏦 Сбербанк по счёту",
-                "tinkoff_rub": "🏦 Tinkoff",
-                "alfabank_rub": "🏦 Альфа-Банк",
-                "raiffeisen_rub": "🏦 Райффайзен",
-                "vtb_rub": "🏦 ВТБ",
-                "rnkbbank_rub": "🏦 РНКБ Банк",
-                "postbank_rub": "🏦 Почта Банк",
-                "yoomoney_rub": "💵 ЮMoney",
-                "advcash_rub": "💵 AdvCash",
-                "payeer_rub": "💵 Payeer",
-                "unistream_rub": "🏦 UniStream",
-                "rocketbank_rub": "🏦 Рокет Банк",
-                "mobile_rub": "📱 Перевод на мобильную связь",
-                "otpbank_rub": "🏦 ОТП Банк",
-                "rsb_rub": "🏦 Россельхозбанк",
-                "psb_rub": "🏦 Промсвязьбанк",
-                "solidaritybank_rub": "🏦 Солидарность Банк",
-                "card_tj_rub": "💳 По номеру карты (Таджикистан)",
-                "card_kg_rub": "💳 По номеру карты (Кыргызстан)",
-                "card_uz_rub": "💳 По номеру карты (Узбекистан)",
-                # USD методы
-                "paypal_usd": "💳 PayPal (USD)",
-                "advcash_usd": "💵 AdvCash (USD)",
-                "payeer_usd": "💵 Payeer (USD)",
-                # EUR методы
-                "paypal_eur": "💳 PayPal (EUR)",
-                "advcash_eur": "💵 AdvCash (EUR)",
-                "payeer_eur": "💵 Payeer (EUR)",
-                # UAH методы
-                "monobank_uah": "🏦 Monobank (UAH)",
-                "privatbank_uah": "🏦 PrivatBank (UAH)",
-                "raiffeisen_uah": "🏦 Raiffeisen (UAH)",
-                # KZT методы
-                "kaspibank_kzt": "🏦 Kaspi Bank (KZT)",
-                "halykbank_kzt": "🏦 Halyk Bank (KZT)",
-                "jysanbank_kzt": "🏦 Jysan Bank (KZT)",
-                "centercreditbank_kzt": "🏦 CenterCredit Bank (KZT)",
-                "fortebank_kzt": "🏦 ForteBank (KZT)",
-                "advcash_kzt": "💵 AdvCash (KZT)",
-                "berekebank_kzt": "🏦 Bereke Bank (KZT)",
-                "homecreditbank_kzt": "🏦 Home Credit Bank (KZT)",
-                # USDT
-                "nicewallet_usdt": "💵 NiceWallet (USDT)",
-            }
-            
-            buttons = []
-            for method in available_methods:
-                method_display = method_names.get(method, method.upper())
-                buttons.append(
-                    InlineKeyboardButton(
-                        text=method_display,
-                        callback_data=f"method:{product.slug}:{price.duration_days}:{method}"
-                    )
-                )
-            
-            # Группируем кнопки по 2 в ряд
-            keyboard = []
-            for i in range(0, len(buttons), 2):
-                row = buttons[i:i+2]
-                keyboard.append(row)
-            keyboard.append([InlineKeyboardButton(text="↩️ Назад", callback_data=f"product:{product.slug}")])
-            
-            text = (
-                f"<b>{product.title}</b>\n\n"
-                f"📅 Срок: {price.duration_days} дней\n"
-                f"💰 Сумма: {int(price.price_rub)}₽\n"
-                f"📧 Email: {user_email}\n\n"
-                f"Выберите метод оплаты:"
-            )
-            
-            # Сохраняем email в состоянии
-            await state.update_data(user_email=user_email)
-            
-            if call:
                 try:
                     await call.message.edit_text(
                         text,
@@ -464,21 +370,12 @@ class BotService:
                         text,
                         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
                     )
-            elif message:
-                await message.answer(
-                    text,
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
-                )
 
         @dp.callback_query(F.data.startswith("method:"))
-        async def confirm_payment(call: CallbackQuery, state: FSMContext):
+        async def confirm_payment(call: CallbackQuery):
             """Шаг 2: Подтверждение покупки"""
             _, slug, duration_str, method = call.data.split(":")
             duration = int(duration_str)
-            
-            # Получаем email из состояния
-            data = await state.get_data()
-            user_email = data.get("user_email", "")
             
             with SessionLocal() as db:
                 settings_obj = await self._get_settings(db)
@@ -513,14 +410,6 @@ class BotService:
                     await call.answer("Минимальная сумма для оплаты через СБП составляет 200 рублей", show_alert=True)
                     return
                 
-                # Сохраняем метод оплаты в состоянии
-                await state.update_data(
-                    payment_method=method,
-                    product_slug=slug,
-                    duration_days=duration,
-                    user_email=user_email
-                )
-                
                 method_names = {
                     "sbp_rub": "СБП по QR",
                     "sbp": "СБП",
@@ -554,7 +443,6 @@ class BotService:
                     f"📦 Товар: {product.title}\n"
                     f"📅 Срок: {duration} дней\n"
                     f"💰 Сумма: {int(price.price_rub)}₽\n"
-                    f"📧 Email: {user_email}\n"
                     f"💳 Метод оплаты: {method_display}\n\n"
                     f"Подтвердите покупку:"
                 )
@@ -577,19 +465,10 @@ class BotService:
                     )
 
         @dp.callback_query(F.data.startswith("confirm:"))
-        async def create_payment(call: CallbackQuery, state: FSMContext):
+        async def create_payment(call: CallbackQuery):
             """Шаг 3: Создание платежа"""
             _, slug, duration_str, method = call.data.split(":")
             duration = int(duration_str)
-            
-            # Получаем email из состояния
-            data = await state.get_data()
-            user_email = data.get("user_email", "")
-            
-            if not user_email:
-                await call.answer("Ошибка: email не указан. Начните заново.", show_alert=True)
-                await state.clear()
-                return
             
             with SessionLocal() as db:
                 settings_obj = await self._get_settings(db)
@@ -653,6 +532,9 @@ class BotService:
 
                 desc = f"{product.title} {duration}d / Telegram ID: {user.telegram_id}"
                 
+                # Генерируем автоматический email для NicePay
+                customer_email = f"user_{user.telegram_id}@morpheus.local"
+                
                 try:
                     # Определяем валюту на основе метода оплаты
                     method_lower = method.lower() if method else ""
@@ -681,7 +563,7 @@ class BotService:
                     logger.info(f"Creating payment via NicePay API:")
                     logger.info(f"  Order ID: {order.id}")
                     logger.info(f"  Amount: {amount} {currency}")
-                    logger.info(f"  Customer email: {user_email}")
+                    logger.info(f"  Customer email: {customer_email}")
                     logger.info(f"  Method: {method}")
                     
                     # Создаем платеж через NicePay API
@@ -689,7 +571,7 @@ class BotService:
                         order_id=str(order.id),
                         amount=amount,
                         currency=currency,
-                        customer=user_email,  # Используем email пользователя
+                        customer=customer_email,  # Автоматически сгенерированный email
                         description=desc,
                         method=method.lower() if method else None,
                         success_url=settings.nicepay_success_url or f"{settings.public_base_url}/success",
@@ -711,9 +593,6 @@ class BotService:
                     
                     logger.info(f"Order {order.id} created successfully. Key {key.id} remains available until payment confirmation.")
                     
-                    # Очищаем состояние
-                    await state.clear()
-                    
                 except Exception as e:
                     # При ошибке платежа - удаляем заказ
                     db.rollback()
@@ -730,9 +609,8 @@ class BotService:
                         f"✅ <b>Платеж создан!</b>\n\n"
                         f"📦 Товар: {product.title}\n"
                         f"📅 Срок: {duration} дней\n"
-                        f"💰 Сумма: {int(order.amount)}₽\n"
-                        f"📧 Email: {user_email}\n\n"
-                        f"Нажмите на кнопку ниже для оплаты\n\n"
+                        f"💰 Сумма: {int(order.amount)}₽\n\n"
+                        f"Перейдите по ссылке для оплаты:\n{order.payment_url}\n\n"
                         f"После успешной оплаты вы получите ключ и файл.",
                         reply_markup=InlineKeyboardMarkup(
                             inline_keyboard=[[InlineKeyboardButton(text="💳 Перейти к оплате", url=order.payment_url)]]
@@ -744,8 +622,7 @@ class BotService:
                         f"✅ <b>Платеж создан!</b>\n\n"
                         f"📦 Товар: {product.title}\n"
                         f"📅 Срок: {duration} дней\n"
-                        f"💰 Сумма: {int(order.amount)}₽\n"
-                        f"📧 Email: {user_email}\n\n"
+                        f"💰 Сумма: {int(order.amount)}₽\n\n"
                         f"Перейдите по ссылке для оплаты:\n{order.payment_url}\n\n"
                         f"После успешной оплаты вы получите ключ и файл.",
                         reply_markup=InlineKeyboardMarkup(
