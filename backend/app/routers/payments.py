@@ -63,19 +63,25 @@ async def nicepay_webhook(
             raise HTTPException(status_code=404, detail="Order not found")
         
         # Конвертируем amount из центов/копеек в рубли
-        amount_rub = amount / 100.0
-        
-        # Если валюта не RUB, конвертируем (упрощенно)
-        if amount_currency != "RUB":
-            # Примерные курсы (должны совпадать с теми, что в bot.py)
-            if amount_currency == "USD":
-                amount_rub = amount_rub * 100.0  # 1 USD = 100 RUB
-            elif amount_currency == "EUR":
-                amount_rub = amount_rub * 110.0  # 1 EUR = 110 RUB
-            elif amount_currency == "UAH":
-                amount_rub = amount_rub / 4.0    # 1 RUB = 4 UAH
-            elif amount_currency == "KZT":
-                amount_rub = amount_rub / 5.0    # 1 RUB = 5 KZT
+        # amount уже в минимальных единицах валюты (копейки для RUB, центы для USD)
+        if amount_currency == "RUB":
+            amount_rub = amount / 100.0  # Копейки в рубли
+        elif amount_currency == "USD":
+            # Центы в доллары, затем доллары в рубли по курсу 100
+            amount_usd = amount / 100.0  # Центы в доллары
+            amount_rub = amount_usd * 100.0  # Доллары в рубли
+        elif amount_currency == "EUR":
+            amount_eur = amount / 100.0  # Центы в евро
+            amount_rub = amount_eur * 110.0  # Евро в рубли
+        elif amount_currency == "UAH":
+            amount_uah = amount / 100.0  # Копейки в гривны
+            amount_rub = amount_uah / 4.0  # Гривны в рубли
+        elif amount_currency == "KZT":
+            amount_kzt = amount / 100.0  # Тиыны в тенге
+            amount_rub = amount_kzt / 5.0  # Тенге в рубли
+        else:
+            # Неизвестная валюта, предполагаем что это копейки/центы
+            amount_rub = amount / 100.0
         
         # Проверяем сумму (с погрешностью 10%)
         expected_amount = order.amount

@@ -23,7 +23,6 @@ from app.models import (
     Build,
 )
 from app.services.nicepay import NicepayClient
-from app.security import get_password_hash
 
 
 class BotService:
@@ -533,49 +532,54 @@ class BotService:
                 desc = f"{product.title} {duration}d / Telegram ID: {user.telegram_id}"
                 
                 # Генерируем автоматический email для NicePay
-                customer_email = f"user_{user.telegram_id}@morpheus.local"
+                customer_email = f"user_{user.telegram_id}@example.com"
                 
                 try:
                     # Определяем валюту на основе метода оплаты
                     method_lower = method.lower() if method else ""
                     if method_lower.endswith("_rub"):
                         currency = "RUB"
-                        amount = order.amount / 100.0  # Конвертируем рубли в копейки для API
+                        # Рубли в копейки: price_rub * 100
+                        amount = price.price_rub * 100
                     elif method_lower.endswith("_usd"):
                         currency = "USD"
-                        amount = order.amount / 100.0  # Примерный курс 1 USD = 100 RUB
+                        # RUB → USD по курсу 100, затем в центы
+                        amount = price.price_rub
                     elif method_lower.endswith("_eur"):
                         currency = "EUR"
-                        amount = order.amount / 110.0  # Примерный курс 1 EUR = 110 RUB
+                        # RUB → EUR по курсу 110, затем в центы
+                        amount = int(price.price_rub / 110.0 * 100)
                     elif method_lower.endswith("_uah"):
                         currency = "UAH"
-                        amount = order.amount * 4.0  # Примерный курс 1 RUB = 4 UAH
+                        # RUB → UAH по курсу 4, затем в копейки
+                        amount = int(price.price_rub * 4.0 * 100)
                     elif method_lower.endswith("_kzt"):
                         currency = "KZT"
-                        amount = order.amount * 5.0  # Примерный курс 1 RUB = 5 KZT
+                        # RUB → KZT по курсу 5, затем в тиыны
+                        amount = int(price.price_rub * 5.0 * 100)
                     elif method_lower.endswith("_usdt"):
                         currency = "USD"
-                        amount = order.amount / 100.0
+                        # USDT обычно эквивалентен USD
+                        amount = price.price_rub
                     else:
-                        currency = settings.nicepay_currency.upper()
-                        amount = order.amount / 100.0  # По умолчанию RUB в копейки
-                
+                        currency = "RUB"
+                        amount = price.price_rub * 100
+                    
                     logger.info(f"Creating payment via NicePay API:")
                     logger.info(f"  Order ID: {order.id}")
-                    logger.info(f"  Amount: {amount} {currency}")
+                    logger.info(f"  Amount in cents/kopecks: {amount} {currency}")
                     logger.info(f"  Customer email: {customer_email}")
-                    logger.info(f"  Method: {method}")
                     
                     # Создаем платеж через NicePay API
+                    # Не передаем method, success_url, fail_url - как в тестовом запросе
                     payment_result = await self.nicepay.create_payment(
                         order_id=str(order.id),
-                        amount=amount,
+                        amount=amount,  # Уже в копейках/центах!
                         currency=currency,
-                        customer=customer_email,  # Автоматически сгенерированный email
+                        customer=customer_email,
                         description=desc,
-                        method=method.lower() if method else None,
-                        success_url=settings.nicepay_success_url or f"{settings.public_base_url}/success",
-                        fail_url=settings.nicepay_fail_url or f"{settings.public_base_url}/fail",
+                        # Не передаем method - пользователь выберет на стороне NicePay
+                        # Не передаем success_url, fail_url - используем настройки мерчанта
                     )
                     
                     if not payment_result.get("success") or not payment_result.get("link"):
