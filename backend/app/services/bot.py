@@ -22,7 +22,7 @@ from app.models import (
     OrderStatus,
     Build,
 )
-from app.services.anypay import AnypayClient
+from app.services.nicepay import NicepayClient
 from app.security import get_password_hash
 
 
@@ -43,7 +43,7 @@ class BotService:
             logger.error(f"Failed to initialize bot with token: {token[:20]}... Error: {e}")
             raise
         self.dp = Dispatcher()
-        self.anypay = AnypayClient()
+        self.nicepay = NicepayClient()
 
     async def _get_settings(self, db: Session) -> BotSettings:
         settings_obj = db.query(BotSettings).first()
@@ -270,19 +270,26 @@ class BotService:
                     return
                 
                 # Получаем доступные методы оплаты
-                methods_str = settings.anypay_methods or "ym,btc,eth,qiwi"
+                methods_str = settings.nicepay_methods or "paypal_usd"
                 available_methods = [m.strip().lower() for m in methods_str.split(",") if m.strip()]
                 
                 # Названия методов для отображения
                 method_names = {
-                    "ym": "💳 ЮMoney",
-                    "btc": "₿ Bitcoin",
-                    "eth": "Ξ Ethereum",
-                    "qiwi": "💸 Qiwi",
-                    "card": "💳 Банковская карта",
-                    "sbp": "📱 СБП",
-                    "usdt": "💵 USDT",
-                    "ltc": "Ł Litecoin",
+                    "paypal_usd": "💳 PayPal (USD)",
+                    "paypal_eur": "💳 PayPal (EUR)",
+                    "advcash_usd": "💵 AdvCash (USD)",
+                    "advcash_eur": "💵 AdvCash (EUR)",
+                    "advcash_rub": "💵 AdvCash (RUB)",
+                    "advcash_kzt": "💵 AdvCash (KZT)",
+                    "payeer_usd": "💵 Payeer (USD)",
+                    "payeer_eur": "💵 Payeer (EUR)",
+                    "payeer_rub": "💵 Payeer (RUB)",
+                    "sbp_rub": "📱 СБП (RUB)",
+                    "sberbank_rub": "🏦 Сбербанк (RUB)",
+                    "tinkoff_rub": "🏦 Tinkoff (RUB)",
+                    "monobank_uah": "🏦 Monobank (UAH)",
+                    "privatbank_uah": "🏦 PrivatBank (UAH)",
+                    "nicewallet_usdt": "💵 NiceWallet (USDT)",
                 }
                 
                 buttons = []
@@ -352,14 +359,21 @@ class BotService:
                     return
                 
                 method_names = {
-                    "ym": "ЮMoney",
-                    "btc": "Bitcoin",
-                    "eth": "Ethereum",
-                    "qiwi": "Qiwi",
-                    "card": "Банковская карта",
-                    "sbp": "СБП",
-                    "usdt": "USDT",
-                    "ltc": "Litecoin",
+                    "paypal_usd": "PayPal (USD)",
+                    "paypal_eur": "PayPal (EUR)",
+                    "advcash_usd": "AdvCash (USD)",
+                    "advcash_eur": "AdvCash (EUR)",
+                    "advcash_rub": "AdvCash (RUB)",
+                    "advcash_kzt": "AdvCash (KZT)",
+                    "payeer_usd": "Payeer (USD)",
+                    "payeer_eur": "Payeer (EUR)",
+                    "payeer_rub": "Payeer (RUB)",
+                    "sbp_rub": "СБП (RUB)",
+                    "sberbank_rub": "Сбербанк (RUB)",
+                    "tinkoff_rub": "Tinkoff (RUB)",
+                    "monobank_uah": "Monobank (UAH)",
+                    "privatbank_uah": "PrivatBank (UAH)",
+                    "nicewallet_usdt": "NiceWallet (USDT)",
                 }
                 method_display = method_names.get(method.lower(), method.upper())
                 
@@ -447,30 +461,45 @@ class BotService:
 
                 desc = f"{product.title} {duration}d / user {user.telegram_id}"
                 try:
-                    # Создаем URL для оплаты через SCI (не API!)
-                    logger.info(f"Creating payment URL via SCI for order {order.id}, amount {order.amount}, method {method}")
-                    payment_url = self.anypay.create_payment_url(
-                        str(order.id), 
-                        order.amount, 
-                        desc,
-                        email=f"user_{user.telegram_id}@morpheus.local",
-                        method=method.lower()
+                    # Создаем платеж через NicePay API
+                    logger.info(f"Creating payment via NicePay API for order {order.id}, amount {order.amount}, method {method}")
+                    
+                    # Конвертируем сумму из RUB в USD если нужно (или используем валюту из настроек)
+                    currency = settings.nicepay_currency.upper()
+                    amount = order.amount
+                    
+                    # Если валюта не RUB, нужно конвертировать (упрощенно, можно добавить реальный курс)
+                    if currency != "RUB":
+                        # Для примера используем курс 1 USD = 100 RUB (нужно будет настроить реальный курс)
+                        if currency == "USD":
+                            amount = order.amount / 100.0  # Примерный курс
+                    
+                    payment_result = await self.nicepay.create_payment(
+                        order_id=str(order.id),
+                        amount=amount,
+                        currency=currency,
+                        customer=f"user_{user.telegram_id}@morpheus.local",
+                        description=desc,
+                        method=method.lower() if method else None,
+                        success_url=settings.nicepay_success_url or f"{settings.public_base_url}/success",
+                        fail_url=settings.nicepay_fail_url or f"{settings.public_base_url}/fail",
                     )
                     
-                    if not payment_url or not payment_url.startswith("https://anypay.io/merchant"):
-                        raise ValueError(f"Invalid payment URL generated: {payment_url}")
+                    if not payment_result.get("success") or not payment_result.get("link"):
+                        raise ValueError(f"Invalid payment response: {payment_result}")
+                    
+                    payment_url = payment_result["link"]
+                    payment_id = payment_result["payment_id"]
                     
                     logger.info(f"Payment URL created successfully: {payment_url[:100]}...")
                     
                     order.payment_url = payment_url
-                    order.provider_pay_id = str(order.id)  # Используем order.id как pay_id
+                    order.provider_pay_id = payment_id
                     order.status = OrderStatus.waiting
-                    # Только после успешного создания платежа меняем статус ключа
-                    key.status = KeyStatus.sold
-                    key.sold_at = datetime.utcnow()
-                    key.sold_to_user_id = user.id
+                    # НЕ меняем статус ключа здесь - он будет изменен только при успешной оплате через webhook
+                    # Ключ остается available, но связан с заказом через order.key
                     db.commit()
-                    logger.info(f"Order {order.id} created successfully, key {key.id} marked as sold")
+                    logger.info(f"Order {order.id} created successfully, payment URL generated. Key {key.id} remains available until payment confirmation.")
                 except Exception as e:
                     # При ошибке платежа - удаляем заказ и НЕ меняем статус ключа
                     db.rollback()
@@ -479,9 +508,6 @@ class BotService:
                         db.commit()
                     logger.error(f"Payment creation error for order {order.id}: {e}", exc_info=True)
                     error_message = str(e) if str(e) else "Неизвестная ошибка"
-                    # Убираем упоминание "Anypay API error" из сообщения, так как мы используем SCI
-                    if "Anypay API error" in error_message:
-                        error_message = "Ошибка создания платежа. Попробуйте позже или выберите другой метод оплаты."
                     await call.answer(f"Ошибка создания платежа: {error_message}", show_alert=True)
                     return
 

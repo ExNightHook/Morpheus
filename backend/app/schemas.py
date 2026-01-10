@@ -64,6 +64,7 @@ class ProductPriceCreate(BaseModel):
 
 class BotSettingsOut(BaseModel):
     bot_enabled: bool
+    api_enabled: bool
     maintenance_mode: bool
     alert_message: Optional[str]
     technical_message: Optional[str]
@@ -74,6 +75,7 @@ class BotSettingsOut(BaseModel):
 
 class BotSettingsUpdate(BaseModel):
     bot_enabled: Optional[bool] = None
+    api_enabled: Optional[bool] = None
     maintenance_mode: Optional[bool] = None
     alert_message: Optional[str] = None
     technical_message: Optional[str] = None
@@ -113,15 +115,6 @@ class OrderOut(BaseModel):
 
     class Config:
         from_attributes = True
-
-
-class AnypayWebhook(BaseModel):
-    status: str
-    pay_id: Optional[str]
-    transaction_id: Optional[str]
-    amount: float
-    currency: str
-    sign: str
 
 
 class UserOut(BaseModel):

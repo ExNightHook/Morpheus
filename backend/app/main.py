@@ -38,6 +38,24 @@ async def lifespan(app: FastAPI):
                 logger.info("Migrated telegram_id to BigInteger")
     except Exception as e:
         logger.warning(f"Migration check failed (may be already migrated): {e}")
+    
+    # Миграция: добавление колонки api_enabled в bot_settings
+    try:
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            # Проверяем, существует ли колонка api_enabled
+            result = conn.execute(text("""
+                SELECT column_name FROM information_schema.columns 
+                WHERE table_name = 'bot_settings' AND column_name = 'api_enabled'
+            """))
+            row = result.fetchone()
+            if not row:
+                # Добавляем колонку api_enabled со значением по умолчанию True
+                conn.execute(text("ALTER TABLE bot_settings ADD COLUMN api_enabled BOOLEAN DEFAULT TRUE"))
+                conn.commit()
+                logger.info("Added api_enabled column to bot_settings")
+    except Exception as e:
+        logger.warning(f"Migration check for api_enabled failed (may be already migrated): {e}")
     ensure_admin()
     try:
         asyncio.create_task(run_bot())

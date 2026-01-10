@@ -4,13 +4,23 @@ from sqlalchemy.orm import Session
 from typing import Dict
 
 from app.database import get_db
-from app.models import Product, Key, KeyStatus
+from app.models import Product, Key, KeyStatus, BotSettings
 
 router = APIRouter(prefix="/api", tags=["api"])
 
 
+def check_api_enabled(db: Session):
+    """Проверяет, включен ли API"""
+    settings = db.query(BotSettings).first()
+    if not settings:
+        return True  # По умолчанию включен
+    return settings.api_enabled
+
+
 @router.get("/products")
 def products(db: Session = Depends(get_db)):
+    if not check_api_enabled(db):
+        raise HTTPException(status_code=503, detail="API is disabled")
     items = []
     products = db.query(Product).filter(Product.is_active == True).all()  # noqa: E712
     for p in products:
@@ -35,6 +45,8 @@ def product_auth(
     payload: dict,
     db: Session = Depends(get_db),
 ):
+    if not check_api_enabled(db):
+        raise HTTPException(status_code=503, detail="API is disabled")
     key_value = payload.get("key")
     uuid = payload.get("uuid")
     if not key_value or not uuid:

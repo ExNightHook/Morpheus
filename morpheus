@@ -32,26 +32,45 @@ case "$1" in
             exit 1
         fi
         
-        # Get admin credentials from database
-        ADMIN_INFO=$(docker compose exec -T db psql -U morpheus -d morpheus -t -c "SELECT username, password_hash FROM admin_users LIMIT 1;" 2>/dev/null)
+        # Get admin username from database
+        ADMIN_USERNAME=$(docker compose exec -T db psql -U morpheus -d morpheus -t -c "SELECT username FROM admin_users LIMIT 1;" 2>/dev/null | xargs)
         
-        if [ -z "$ADMIN_INFO" ] || [ "$ADMIN_INFO" = "" ]; then
+        if [ -z "$ADMIN_USERNAME" ] || [ "$ADMIN_USERNAME" = "" ]; then
             echo -e "${YELLOW}No admin user found. Checking logs for auto-generated credentials...${NC}"
             # Try to get from logs
-            docker compose logs api 2>/dev/null | grep -i "Generated admin credentials" | tail -1
-            echo -e "${YELLOW}If no credentials found, restart the API container to generate new admin user.${NC}"
+            CREDENTIALS_LOG=$(docker compose logs api 2>/dev/null | grep -i "Generated admin credentials" | tail -1)
+            if [ -n "$CREDENTIALS_LOG" ]; then
+                echo "$CREDENTIALS_LOG"
+            else
+                echo -e "${YELLOW}If no credentials found, restart the API container to generate new admin user.${NC}"
+            fi
         else
-            echo "$ADMIN_INFO" | while IFS='|' read -r username password_hash; do
-                username=$(echo "$username" | xargs)
-                echo -e "${GREEN}Username: ${NC}$username"
-                echo -e "${YELLOW}Password hash: ${NC}$password_hash"
-                echo -e "${YELLOW}Note: Password is hashed. Check API logs for auto-generated password on first startup.${NC}"
-            done
+            echo -e "${GREEN}Username: ${NC}$ADMIN_USERNAME"
+            
+            # Try to get password from logs (most recent)
+            PASSWORD_LOG=$(docker compose logs api 2>/dev/null | grep -i "Generated admin credentials" | tail -1)
+            
+            if [ -n "$PASSWORD_LOG" ]; then
+                # Extract password from log line (format: "Generated admin credentials - username: admin password: xxxxxxxx")
+                PASSWORD=$(echo "$PASSWORD_LOG" | sed -n 's/.*password: \([^ ]*\).*/\1/p')
+                if [ -n "$PASSWORD" ]; then
+                    echo -e "${GREEN}Password: ${NC}$PASSWORD"
+                    echo -e "${YELLOW}Note: This is the password that was generated on first startup.${NC}"
+                    echo -e "${YELLOW}If you changed the password, it won't be shown here.${NC}"
+                else
+                    echo -e "${YELLOW}Password not found in logs. Checking for recent password generation...${NC}"
+                    echo "$PASSWORD_LOG"
+                fi
+            else
+                echo -e "${YELLOW}Password not found in logs.${NC}"
+                echo -e "${YELLOW}The password was generated on first startup. Check API logs or reset password.${NC}"
+                echo -e "${YELLOW}To see the original password, check: docker compose logs api | grep 'Generated admin credentials'${NC}"
+            fi
+            
+            echo ""
+            echo -e "${GREEN}Login URL: ${NC}http://your-domain/admin/login"
+            echo -e "${GREEN}Use these credentials to log in to the admin panel.${NC}"
         fi
-        
-        # Also check API logs for generated password
-        echo -e "\n${GREEN}Checking API logs for auto-generated password...${NC}"
-        docker compose logs api 2>/dev/null | grep -i "Generated admin credentials" | tail -1 || echo "No auto-generated credentials found in logs"
         ;;
         
     -update|--update)

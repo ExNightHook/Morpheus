@@ -407,6 +407,15 @@
                     </div>
                     <div class="form-group">
                         <label style="display: flex; align-items: center; gap: 10px;">
+                            <span>API включен</span>
+                            <label class="switch">
+                                <input type="checkbox" id="api-enabled">
+                                <span class="slider"></span>
+                            </label>
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label style="display: flex; align-items: center; gap: 10px;">
                             <span>Режим технических работ</span>
                             <label class="switch">
                                 <input type="checkbox" id="maintenance-mode">
@@ -424,6 +433,22 @@
                     </div>
                     <button type="submit" class="btn">Сохранить настройки</button>
                 </form>
+            </div>
+            <div class="card">
+                <h2>Экспорт и импорт данных</h2>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px;">
+                    <div>
+                        <h3>Экспорт данных</h3>
+                        <p style="color: #666; margin-bottom: 15px;">Экспортировать всех пользователей, ключи и продукты в JSON формате</p>
+                        <button class="btn" onclick="exportData()">📥 Экспортировать данные</button>
+                    </div>
+                    <div>
+                        <h3>Импорт данных</h3>
+                        <p style="color: #666; margin-bottom: 15px;">Импортировать данные из JSON файла</p>
+                        <input type="file" id="import-file" accept=".json" style="margin-bottom: 10px;">
+                        <button class="btn" onclick="importData()">📤 Импортировать данные</button>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -1147,6 +1172,7 @@
                 const settings = await response.json();
                 
                 document.getElementById('bot-enabled').checked = settings.bot_enabled;
+                document.getElementById('api-enabled').checked = settings.api_enabled !== undefined ? settings.api_enabled : true;
                 document.getElementById('maintenance-mode').checked = settings.maintenance_mode;
                 document.getElementById('alert-message').value = settings.alert_message || '';
                 document.getElementById('technical-message').value = settings.technical_message || '';
@@ -1159,6 +1185,7 @@
             e.preventDefault();
             const data = {
                 bot_enabled: document.getElementById('bot-enabled').checked,
+                api_enabled: document.getElementById('api-enabled').checked,
                 maintenance_mode: document.getElementById('maintenance-mode').checked,
                 alert_message: document.getElementById('alert-message').value || null,
                 technical_message: document.getElementById('technical-message').value || null
@@ -1225,6 +1252,78 @@
         function logout() {
             localStorage.removeItem('admin_token');
             window.location.href = '/admin/login';
+        }
+
+        async function exportData() {
+            try {
+                const response = await apiCall('/admin/export/data');
+                const data = await response.json();
+                
+                // Создаем blob и скачиваем файл
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `morpheus_export_${new Date().toISOString().split('T')[0]}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                showAlert('Данные успешно экспортированы!');
+            } catch (e) {
+                console.error(e);
+                showAlert('Ошибка экспорта данных', 'error');
+            }
+        }
+
+        async function importData() {
+            const fileInput = document.getElementById('import-file');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                showAlert('Выберите файл для импорта', 'error');
+                return;
+            }
+            
+            if (!confirm('Вы уверены, что хотите импортировать данные? Это может привести к дублированию записей.')) {
+                return;
+            }
+            
+            try {
+                const text = await file.text();
+                const data = JSON.parse(text);
+                
+                const response = await apiCall('/admin/import/data', {
+                    method: 'POST',
+                    body: JSON.stringify(data)
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showAlert(result.message || 'Данные успешно импортированы!');
+                    fileInput.value = '';
+                    // Перезагружаем данные
+                    if (document.getElementById('products').classList.contains('active')) {
+                        loadProducts();
+                    }
+                    if (document.getElementById('keys').classList.contains('active')) {
+                        loadKeys();
+                    }
+                    if (document.getElementById('users').classList.contains('active')) {
+                        loadUsers();
+                    }
+                } else {
+                    showAlert('Ошибка импорта: ' + (result.error || 'Неизвестная ошибка'), 'error');
+                    if (result.imported && result.imported.errors && result.imported.errors.length > 0) {
+                        console.error('Import errors:', result.imported.errors);
+                    }
+                }
+            } catch (e) {
+                console.error(e);
+                showAlert('Ошибка импорта данных: ' + e.message, 'error');
+            }
         }
 
         // Закрытие модального окна при клике вне его

@@ -47,6 +47,7 @@ class BotSettings(Base):
     __tablename__ = "bot_settings"
     id = Column(Integer, primary_key=True, default=1)
     bot_enabled = Column(Boolean, default=False)
+    api_enabled = Column(Boolean, default=True)
     maintenance_mode = Column(Boolean, default=False)
     alert_message = Column(Text, nullable=True)
     technical_message = Column(Text, nullable=True)
@@ -144,7 +145,7 @@ class Order(Base):
     duration_days = Column(Integer, nullable=False)
     amount = Column(Float, nullable=False)
     currency = Column(String(10), default="RUB")
-    provider = Column(String(30), default="anypay")
+    provider = Column(String(30), default="nicepay")
     provider_pay_id = Column(String(50), nullable=True)
     payment_url = Column(String(400), nullable=True)
     status = Column(Enum(OrderStatus), default=OrderStatus.pending)

@@ -21,15 +21,14 @@ class Settings(BaseSettings):
 
     public_base_url: str = Field("https://localhost", env="PUBLIC_BASE_URL")
 
-    # Anypay
-    anypay_project_id: str = Field("", env="ANYPAY_PROJECT_ID")
-    anypay_api_id: str = Field("", env="ANYPAY_API_ID")
-    anypay_api_key: str = Field("", env="ANYPAY_API_KEY")
-    anypay_currency: str = Field("RUB", env="ANYPAY_CURRENCY")
-    # Список доступных методов оплаты, разделенных запятой (например: "ym,btc,eth,qiwi")
-    anypay_methods: str = Field("ym,btc,eth,qiwi", env="ANYPAY_METHODS")
-    anypay_success_url: str = Field("http://localhost/success", env="ANYPAY_SUCCESS_URL")
-    anypay_fail_url: str = Field("http://localhost/fail", env="ANYPAY_FAIL_URL")
+    # NicePay
+    nicepay_merchant_id: str = Field("", env="NICEPAY_MERCHANT_ID")
+    nicepay_secret_key: str = Field("", env="NICEPAY_SECRET_KEY")
+    nicepay_currency: str = Field("USD", env="NICEPAY_CURRENCY")
+    # Список доступных методов оплаты, разделенных запятой (например: "paypal_usd,advcash_usd")
+    nicepay_methods: str = Field("paypal_usd", env="NICEPAY_METHODS")
+    nicepay_success_url: str = Field("", env="NICEPAY_SUCCESS_URL")
+    nicepay_fail_url: str = Field("", env="NICEPAY_FAIL_URL")
 
     class Config:
         env_file = ".env"
@@ -41,4 +40,3 @@ settings = Settings()
 # Логируем загруженные настройки (без секретных данных)
 logger.debug(f"Loaded settings: POSTGRES_HOST={settings.postgres_host}, PUBLIC_BASE_URL={settings.public_base_url}")
 logger.debug(f"TELEGRAM_BOT_TOKEN length: {len(settings.telegram_bot_token)}, first 10 chars: {settings.telegram_bot_token[:10] if settings.telegram_bot_token else 'EMPTY'}...")
-

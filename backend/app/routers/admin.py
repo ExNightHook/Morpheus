@@ -400,7 +400,7 @@ def delete_key(
 def get_settings(db: Session = Depends(get_db), _: AdminUser = Depends(get_current_admin)):
     settings_obj = db.query(BotSettings).first()
     if not settings_obj:
-        settings_obj = BotSettings()
+        settings_obj = BotSettings(bot_enabled=False, api_enabled=True, maintenance_mode=False)
         db.add(settings_obj)
         db.commit()
         db.refresh(settings_obj)
@@ -419,6 +419,8 @@ def update_settings(
         db.add(settings_obj)
     if payload.bot_enabled is not None:
         settings_obj.bot_enabled = payload.bot_enabled
+    if payload.api_enabled is not None:
+        settings_obj.api_enabled = payload.api_enabled
     if payload.maintenance_mode is not None:
         settings_obj.maintenance_mode = payload.maintenance_mode
     if payload.alert_message is not None:
@@ -435,4 +437,179 @@ def list_users(db: Session = Depends(get_db), _: AdminUser = Depends(get_current
     """Список пользователей"""
     users = db.query(User).order_by(User.created_at.desc()).limit(500).all()
     return users
+
+
+@router.get("/export/data")
+def export_data(db: Session = Depends(get_db), _: AdminUser = Depends(get_current_admin)):
+    """Экспорт всех данных (пользователи, ключи, продукты)"""
+    from fastapi.responses import JSONResponse
+    import json
+    
+    # Экспортируем пользователей
+    users = db.query(User).all()
+    users_data = [{
+        "id": u.id,
+        "telegram_id": u.telegram_id,
+        "username": u.username,
+        "is_admin": u.is_admin,
+        "created_at": u.created_at.isoformat() if u.created_at else None,
+        "last_seen": u.last_seen.isoformat() if u.last_seen else None,
+    } for u in users]
+    
+    # Экспортируем продукты
+    products = db.query(Product).all()
+    products_data = []
+    for p in products:
+        prices = db.query(ProductPrice).filter_by(product_id=p.id).all()
+        builds = db.query(Build).filter_by(product_id=p.id).all()
+        products_data.append({
+            "id": p.id,
+            "slug": p.slug,
+            "title": p.title,
+            "description": p.description,
+            "is_active": p.is_active,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+            "prices": [{
+                "id": pr.id,
+                "duration_days": pr.duration_days,
+                "price_rub": pr.price_rub,
+            } for pr in prices],
+            "builds": [{
+                "id": b.id,
+                "label": b.label,
+                "file_path": b.file_path,
+                "is_active": b.is_active,
+            } for b in builds],
+        })
+    
+    # Экспортируем ключи
+    keys = db.query(Key).all()
+    keys_data = [{
+        "id": k.id,
+        "product_id": k.product_id,
+        "value": k.value,
+        "duration_days": k.duration_days,
+        "status": k.status.value if k.status else None,
+        "sold_to_user_id": k.sold_to_user_id,
+        "activation_uuid": k.activation_uuid,
+        "sold_at": k.sold_at.isoformat() if k.sold_at else None,
+        "activated_at": k.activated_at.isoformat() if k.activated_at else None,
+        "expires_at": k.expires_at.isoformat() if k.expires_at else None,
+        "created_at": k.created_at.isoformat() if k.created_at else None,
+    } for k in keys]
+    
+    export_data = {
+        "version": "1.0",
+        "exported_at": datetime.utcnow().isoformat(),
+        "users": users_data,
+        "products": products_data,
+        "keys": keys_data,
+    }
+    
+    return JSONResponse(content=export_data)
+
+
+@router.post("/import/data")
+def import_data(
+    data: dict,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    """Импорт данных (пользователи, ключи, продукты)"""
+    from datetime import datetime
+    
+    imported_counts = {"users": 0, "products": 0, "keys": 0, "errors": []}
+    
+    try:
+        # Импортируем пользователей
+        if "users" in data:
+            for user_data in data["users"]:
+                try:
+                    existing = db.query(User).filter_by(telegram_id=user_data["telegram_id"]).first()
+                    if not existing:
+                        user = User(
+                            telegram_id=user_data["telegram_id"],
+                            username=user_data.get("username"),
+                            is_admin=user_data.get("is_admin", False),
+                        )
+                        if user_data.get("created_at"):
+                            user.created_at = datetime.fromisoformat(user_data["created_at"])
+                        if user_data.get("last_seen"):
+                            user.last_seen = datetime.fromisoformat(user_data["last_seen"])
+                        db.add(user)
+                        imported_counts["users"] += 1
+                except Exception as e:
+                    imported_counts["errors"].append(f"User import error: {e}")
+        
+        # Импортируем продукты
+        if "products" in data:
+            for product_data in data["products"]:
+                try:
+                    existing = db.query(Product).filter_by(slug=product_data["slug"]).first()
+                    if not existing:
+                        product = Product(
+                            slug=product_data["slug"],
+                            title=product_data["title"],
+                            description=product_data.get("description"),
+                            is_active=product_data.get("is_active", True),
+                        )
+                        if product_data.get("created_at"):
+                            product.created_at = datetime.fromisoformat(product_data["created_at"])
+                        db.add(product)
+                        db.flush()  # Чтобы получить ID продукта
+                        
+                        # Импортируем цены
+                        for price_data in product_data.get("prices", []):
+                            price = ProductPrice(
+                                product_id=product.id,
+                                duration_days=price_data["duration_days"],
+                                price_rub=price_data["price_rub"],
+                            )
+                            db.add(price)
+                        
+                        imported_counts["products"] += 1
+                except Exception as e:
+                    imported_counts["errors"].append(f"Product import error: {e}")
+        
+        # Импортируем ключи
+        if "keys" in data:
+            for key_data in data["keys"]:
+                try:
+                    existing = db.query(Key).filter_by(value=key_data["value"]).first()
+                    if not existing:
+                        key = Key(
+                            product_id=key_data["product_id"],
+                            value=key_data["value"],
+                            duration_days=key_data["duration_days"],
+                            status=KeyStatus(key_data["status"]) if key_data.get("status") else KeyStatus.available,
+                            sold_to_user_id=key_data.get("sold_to_user_id"),
+                            activation_uuid=key_data.get("activation_uuid"),
+                        )
+                        if key_data.get("sold_at"):
+                            key.sold_at = datetime.fromisoformat(key_data["sold_at"])
+                        if key_data.get("activated_at"):
+                            key.activated_at = datetime.fromisoformat(key_data["activated_at"])
+                        if key_data.get("expires_at"):
+                            key.expires_at = datetime.fromisoformat(key_data["expires_at"])
+                        if key_data.get("created_at"):
+                            key.created_at = datetime.fromisoformat(key_data["created_at"])
+                        db.add(key)
+                        imported_counts["keys"] += 1
+                except Exception as e:
+                    imported_counts["errors"].append(f"Key import error: {e}")
+        
+        db.commit()
+        
+        return {
+            "success": True,
+            "imported": imported_counts,
+            "message": f"Imported {imported_counts['users']} users, {imported_counts['products']} products, {imported_counts['keys']} keys"
+        }
+    except Exception as e:
+        db.rollback()
+        return {
+            "success": False,
+            "error": str(e),
+            "imported": imported_counts,
+        }
 
