@@ -33,12 +33,19 @@ case "$1" in
         fi
         
         # Get admin username from database
-        ADMIN_USERNAME=$(docker compose exec -T db psql -U morpheus -d morpheus -t -c "SELECT username FROM admin_users LIMIT 1;" 2>/dev/null | xargs)
+        # Используем docker-compose или docker compose в зависимости от версии
+        if command -v docker-compose >/dev/null 2>&1; then
+            DOCKER_COMPOSE="docker-compose"
+        else
+            DOCKER_COMPOSE="docker compose"
+        fi
+        
+        ADMIN_USERNAME=$($DOCKER_COMPOSE exec -T db psql -U morpheus -d morpheus -t -c "SELECT username FROM admin_users LIMIT 1;" 2>/dev/null | xargs)
         
         if [ -z "$ADMIN_USERNAME" ] || [ "$ADMIN_USERNAME" = "" ]; then
             echo -e "${YELLOW}No admin user found. Checking logs for auto-generated credentials...${NC}"
             # Try to get from logs
-            CREDENTIALS_LOG=$(docker compose logs api 2>/dev/null | grep -i "Generated admin credentials" | tail -1)
+            CREDENTIALS_LOG=$($DOCKER_COMPOSE logs api 2>/dev/null | grep -i "Generated admin credentials" | tail -1)
             if [ -n "$CREDENTIALS_LOG" ]; then
                 echo "$CREDENTIALS_LOG"
             else
@@ -48,7 +55,7 @@ case "$1" in
             echo -e "${GREEN}Username: ${NC}$ADMIN_USERNAME"
             
             # Try to get password from logs (most recent)
-            PASSWORD_LOG=$(docker compose logs api 2>/dev/null | grep -i "Generated admin credentials" | tail -1)
+            PASSWORD_LOG=$($DOCKER_COMPOSE logs api 2>/dev/null | grep -i "Generated admin credentials" | tail -1)
             
             if [ -n "$PASSWORD_LOG" ]; then
                 # Extract password from log line (format: "Generated admin credentials - username: admin password: xxxxxxxx")
@@ -64,7 +71,7 @@ case "$1" in
             else
                 echo -e "${YELLOW}Password not found in logs.${NC}"
                 echo -e "${YELLOW}The password was generated on first startup. Check API logs or reset password.${NC}"
-                echo -e "${YELLOW}To see the original password, check: docker compose logs api | grep 'Generated admin credentials'${NC}"
+                echo -e "${YELLOW}To see the original password, check: $DOCKER_COMPOSE logs api | grep 'Generated admin credentials'${NC}"
             fi
             
             echo ""
@@ -87,56 +94,84 @@ case "$1" in
             exit 1
         }
         
+        # Используем docker-compose или docker compose в зависимости от версии
+        if command -v docker-compose >/dev/null 2>&1; then
+            DOCKER_COMPOSE="docker-compose"
+        else
+            DOCKER_COMPOSE="docker compose"
+        fi
+        
         echo -e "${YELLOW}Building API container...${NC}"
-        docker compose build api || {
+        $DOCKER_COMPOSE build api || {
             echo -e "${RED}Failed to build API container!${NC}"
             exit 1
         }
         
         echo -e "${YELLOW}Restarting services...${NC}"
-        docker compose up -d || {
+        $DOCKER_COMPOSE up -d || {
             echo -e "${RED}Failed to restart services!${NC}"
             exit 1
         }
         
         echo -e "${GREEN}Update complete!${NC}"
         echo -e "${YELLOW}Checking service status...${NC}"
-        docker compose ps
+        $DOCKER_COMPOSE ps
         ;;
         
     -restart|--restart)
         echo -e "${GREEN}=== Restarting Morpheus Services ===${NC}"
         
+        # Используем docker-compose или docker compose в зависимости от версии
+        if command -v docker-compose >/dev/null 2>&1; then
+            DOCKER_COMPOSE="docker-compose"
+        else
+            DOCKER_COMPOSE="docker compose"
+        fi
+        
         echo -e "${YELLOW}Restarting all services...${NC}"
-        docker compose restart || {
+        $DOCKER_COMPOSE restart || {
             echo -e "${RED}Failed to restart services!${NC}"
             exit 1
         }
         
         echo -e "${GREEN}Services restarted!${NC}"
         echo -e "${YELLOW}Service status:${NC}"
-        docker compose ps
+        $DOCKER_COMPOSE ps
         
         echo -e "\n${YELLOW}Recent API logs:${NC}"
-        docker compose logs api --tail=20
+        $DOCKER_COMPOSE logs api --tail=20
         ;;
         
     -status|--status)
+        # Используем docker-compose или docker compose в зависимости от версии
+        if command -v docker-compose >/dev/null 2>&1; then
+            DOCKER_COMPOSE="docker-compose"
+        else
+            DOCKER_COMPOSE="docker compose"
+        fi
+        
         echo -e "${GREEN}=== Morpheus Service Status ===${NC}"
-        docker compose ps
+        $DOCKER_COMPOSE ps
         
         echo -e "\n${GREEN}=== Recent API Logs ===${NC}"
-        docker compose logs api --tail=30
+        $DOCKER_COMPOSE logs api --tail=30
         
         echo -e "\n${GREEN}=== Database Status ===${NC}"
-        docker compose exec -T db pg_isready -U morpheus 2>/dev/null && echo "Database: OK" || echo "Database: ERROR"
+        $DOCKER_COMPOSE exec -T db pg_isready -U morpheus 2>/dev/null && echo "Database: OK" || echo "Database: ERROR"
         ;;
         
     -logs|--logs)
+        # Используем docker-compose или docker compose в зависимости от версии
+        if command -v docker-compose >/dev/null 2>&1; then
+            DOCKER_COMPOSE="docker-compose"
+        else
+            DOCKER_COMPOSE="docker compose"
+        fi
+        
         SERVICE="${2:-api}"
         LINES="${3:-50}"
         echo -e "${GREEN}=== Logs for service: $SERVICE (last $LINES lines) ===${NC}"
-        docker compose logs "$SERVICE" --tail="$LINES" -f
+        $DOCKER_COMPOSE logs "$SERVICE" --tail="$LINES" -f
         ;;
         
     -help|--help|"")

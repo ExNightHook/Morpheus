@@ -270,25 +270,57 @@ class BotService:
                     return
                 
                 # Получаем доступные методы оплаты
-                methods_str = settings.nicepay_methods or "paypal_usd"
+                methods_str = settings.nicepay_methods or "sbp_rub"
                 available_methods = [m.strip().lower() for m in methods_str.split(",") if m.strip()]
                 
-                # Названия методов для отображения
+                # Названия методов для отображения (RUB)
                 method_names = {
+                    # RUB методы
+                    "sbp_rub": "📱 СБП по QR",
+                    "sbp": "📱 СБП",
+                    "sberbank_rub": "🏦 Сбербанк на карту",
+                    "sberbank_account_rub": "🏦 Сбербанк по счёту",
+                    "tinkoff_rub": "🏦 Tinkoff",
+                    "alfabank_rub": "🏦 Альфа-Банк",
+                    "raiffeisen_rub": "🏦 Райффайзен",
+                    "vtb_rub": "🏦 ВТБ",
+                    "rnkbbank_rub": "🏦 РНКБ Банк",
+                    "postbank_rub": "🏦 Почта Банк",
+                    "yoomoney_rub": "💵 ЮMoney",
+                    "advcash_rub": "💵 AdvCash",
+                    "payeer_rub": "💵 Payeer",
+                    "unistream_rub": "🏦 UniStream",
+                    "rocketbank_rub": "🏦 Рокет Банк",
+                    "mobile_rub": "📱 Перевод на мобильную связь",
+                    "otpbank_rub": "🏦 ОТП Банк",
+                    "rsb_rub": "🏦 Россельхозбанк",
+                    "psb_rub": "🏦 Промсвязьбанк",
+                    "solidaritybank_rub": "🏦 Солидарность Банк",
+                    "card_tj_rub": "💳 По номеру карты (Таджикистан)",
+                    "card_kg_rub": "💳 По номеру карты (Кыргызстан)",
+                    "card_uz_rub": "💳 По номеру карты (Узбекистан)",
+                    # USD методы
                     "paypal_usd": "💳 PayPal (USD)",
-                    "paypal_eur": "💳 PayPal (EUR)",
                     "advcash_usd": "💵 AdvCash (USD)",
-                    "advcash_eur": "💵 AdvCash (EUR)",
-                    "advcash_rub": "💵 AdvCash (RUB)",
-                    "advcash_kzt": "💵 AdvCash (KZT)",
                     "payeer_usd": "💵 Payeer (USD)",
+                    # EUR методы
+                    "paypal_eur": "💳 PayPal (EUR)",
+                    "advcash_eur": "💵 AdvCash (EUR)",
                     "payeer_eur": "💵 Payeer (EUR)",
-                    "payeer_rub": "💵 Payeer (RUB)",
-                    "sbp_rub": "📱 СБП (RUB)",
-                    "sberbank_rub": "🏦 Сбербанк (RUB)",
-                    "tinkoff_rub": "🏦 Tinkoff (RUB)",
+                    # UAH методы
                     "monobank_uah": "🏦 Monobank (UAH)",
                     "privatbank_uah": "🏦 PrivatBank (UAH)",
+                    "raiffeisen_uah": "🏦 Raiffeisen (UAH)",
+                    # KZT методы
+                    "kaspibank_kzt": "🏦 Kaspi Bank (KZT)",
+                    "halykbank_kzt": "🏦 Halyk Bank (KZT)",
+                    "jysanbank_kzt": "🏦 Jysan Bank (KZT)",
+                    "centercreditbank_kzt": "🏦 CenterCredit Bank (KZT)",
+                    "fortebank_kzt": "🏦 ForteBank (KZT)",
+                    "advcash_kzt": "💵 AdvCash (KZT)",
+                    "berekebank_kzt": "🏦 Bereke Bank (KZT)",
+                    "homecreditbank_kzt": "🏦 Home Credit Bank (KZT)",
+                    # USDT
                     "nicewallet_usdt": "💵 NiceWallet (USDT)",
                 }
                 
@@ -358,21 +390,41 @@ class BotService:
                     await call.answer("Нет цены для выбранной длительности", show_alert=True)
                     return
                 
+                # Проверяем минимальную сумму для СБП (200 рублей)
+                if method and method.lower() in ["sbp_rub", "sbp"] and price.price_rub < 200:
+                    await call.answer("Минимальная сумма для оплаты через СБП составляет 200 рублей", show_alert=True)
+                    return
+                
                 method_names = {
+                    # RUB методы
+                    "sbp_rub": "СБП по QR",
+                    "sbp": "СБП",
+                    "sberbank_rub": "Сбербанк на карту",
+                    "sberbank_account_rub": "Сбербанк по счёту",
+                    "tinkoff_rub": "Tinkoff",
+                    "alfabank_rub": "Альфа-Банк",
+                    "raiffeisen_rub": "Райффайзен",
+                    "vtb_rub": "ВТБ",
+                    "yoomoney_rub": "ЮMoney",
+                    "advcash_rub": "AdvCash",
+                    "payeer_rub": "Payeer",
+                    # USD методы
                     "paypal_usd": "PayPal (USD)",
-                    "paypal_eur": "PayPal (EUR)",
                     "advcash_usd": "AdvCash (USD)",
-                    "advcash_eur": "AdvCash (EUR)",
-                    "advcash_rub": "AdvCash (RUB)",
-                    "advcash_kzt": "AdvCash (KZT)",
                     "payeer_usd": "Payeer (USD)",
+                    # EUR методы
+                    "paypal_eur": "PayPal (EUR)",
+                    "advcash_eur": "AdvCash (EUR)",
                     "payeer_eur": "Payeer (EUR)",
-                    "payeer_rub": "Payeer (RUB)",
-                    "sbp_rub": "СБП (RUB)",
-                    "sberbank_rub": "Сбербанк (RUB)",
-                    "tinkoff_rub": "Tinkoff (RUB)",
+                    # UAH методы
                     "monobank_uah": "Monobank (UAH)",
                     "privatbank_uah": "PrivatBank (UAH)",
+                    "raiffeisen_uah": "Raiffeisen (UAH)",
+                    # KZT методы
+                    "kaspibank_kzt": "Kaspi Bank (KZT)",
+                    "halykbank_kzt": "Halyk Bank (KZT)",
+                    "advcash_kzt": "AdvCash (KZT)",
+                    # USDT
                     "nicewallet_usdt": "NiceWallet (USDT)",
                 }
                 method_display = method_names.get(method.lower(), method.upper())
@@ -432,6 +484,12 @@ class BotService:
                 if not price:
                     await call.answer("Нет цены для выбранной длительности", show_alert=True)
                     return
+                
+                # Проверяем минимальную сумму для СБП (200 рублей) перед созданием заказа
+                if method and method.lower() in ["sbp_rub", "sbp"] and price.price_rub < 200:
+                    await call.answer("Минимальная сумма для оплаты через СБП составляет 200 рублей", show_alert=True)
+                    return
+                
                 key = (
                     db.query(Key)
                     .filter(
@@ -464,15 +522,41 @@ class BotService:
                     # Создаем платеж через NicePay API
                     logger.info(f"Creating payment via NicePay API for order {order.id}, amount {order.amount}, method {method}")
                     
-                    # Конвертируем сумму из RUB в USD если нужно (или используем валюту из настроек)
-                    currency = settings.nicepay_currency.upper()
-                    amount = order.amount
+                    # Определяем валюту на основе метода оплаты
+                    method_lower = method.lower() if method else ""
+                    if method_lower.endswith("_rub"):
+                        currency = "RUB"
+                        amount = order.amount
+                    elif method_lower.endswith("_usd"):
+                        currency = "USD"
+                        # Конвертируем RUB в USD (примерный курс, нужно настроить реальный)
+                        amount = order.amount / 100.0  # Примерный курс 1 USD = 100 RUB
+                    elif method_lower.endswith("_eur"):
+                        currency = "EUR"
+                        # Конвертируем RUB в EUR (примерный курс)
+                        amount = order.amount / 110.0  # Примерный курс 1 EUR = 110 RUB
+                    elif method_lower.endswith("_uah"):
+                        currency = "UAH"
+                        amount = order.amount * 4.0  # Примерный курс 1 RUB = 4 UAH
+                    elif method_lower.endswith("_kzt"):
+                        currency = "KZT"
+                        amount = order.amount * 5.0  # Примерный курс 1 RUB = 5 KZT
+                    elif method_lower.endswith("_usdt"):
+                        currency = "USD"  # USDT обычно в USD эквиваленте
+                        amount = order.amount / 100.0
+                    else:
+                        # Используем валюту из настроек по умолчанию
+                        currency = settings.nicepay_currency.upper()
+                        amount = order.amount
+                        if currency != "RUB":
+                            # Примерные курсы
+                            if currency == "USD":
+                                amount = order.amount / 100.0
+                            elif currency == "EUR":
+                                amount = order.amount / 110.0
                     
-                    # Если валюта не RUB, нужно конвертировать (упрощенно, можно добавить реальный курс)
-                    if currency != "RUB":
-                        # Для примера используем курс 1 USD = 100 RUB (нужно будет настроить реальный курс)
-                        if currency == "USD":
-                            amount = order.amount / 100.0  # Примерный курс
+                    # Логируем параметры для отладки
+                    logger.info(f"Payment params: merchant_id={self.nicepay.merchant_id[:10] if len(self.nicepay.merchant_id) > 10 else self.nicepay.merchant_id}..., order_id={order.id}, amount={amount}, currency={currency}, method={method}")
                     
                     payment_result = await self.nicepay.create_payment(
                         order_id=str(order.id),

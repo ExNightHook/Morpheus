@@ -13,10 +13,12 @@ class NicepayClient:
     api_url = "https://nicepay.io/public/api/payment"
     
     def __init__(self):
-        self.merchant_id = settings.nicepay_merchant_id
-        self.secret_key = settings.nicepay_secret_key
+        self.merchant_id = settings.nicepay_merchant_id.strip() if settings.nicepay_merchant_id else ""
+        self.secret_key = settings.nicepay_secret_key.strip() if settings.nicepay_secret_key else ""
         if not self.merchant_id or not self.secret_key:
             logger.error("NicePay credentials not configured! Set NICEPAY_MERCHANT_ID and NICEPAY_SECRET_KEY in .env")
+        else:
+            logger.info(f"NicePay initialized with merchant_id: {self.merchant_id[:10]}...")
 
     async def create_payment(
         self,
@@ -48,14 +50,20 @@ class NicepayClient:
         # Конвертируем сумму в центы/копейки
         amount_cents = int(amount * 100)
         
+        # Убеждаемся, что merchant_id и secret_key - строки без пробелов
+        merchant_id = str(self.merchant_id).strip()
+        secret_key = str(self.secret_key).strip()
+        
         payload = {
-            "merchant_id": self.merchant_id,
-            "secret": self.secret_key,
-            "order_id": order_id,
-            "customer": customer,
+            "merchant_id": merchant_id,
+            "secret": secret_key,
+            "order_id": str(order_id),
+            "customer": str(customer),
             "amount": amount_cents,
-            "currency": currency,
+            "currency": str(currency).upper(),
         }
+        
+        logger.debug(f"NicePay payment payload (without secret): merchant_id={merchant_id}, order_id={order_id}, amount={amount_cents}, currency={currency}")
         
         if description:
             payload["description"] = description[:150]  # Максимум 150 символов
@@ -72,6 +80,8 @@ class NicepayClient:
                 response.raise_for_status()
                 data = response.json()
             
+            logger.debug(f"NicePay API response: {data}")
+            
             if data.get("status") == "success":
                 payment_data = data.get("data", {})
                 logger.info(f"Payment created successfully: order_id={order_id}, payment_id={payment_data.get('payment_id')}")
@@ -85,7 +95,9 @@ class NicepayClient:
                 }
             else:
                 error_msg = data.get("data", {}).get("message", "Unknown error")
-                logger.error(f"NicePay API error: {error_msg}")
+                error_code = data.get("data", {}).get("code")
+                logger.error(f"NicePay API error: {error_msg} (code: {error_code})")
+                logger.error(f"Full response: {data}")
                 raise ValueError(f"NicePay API error: {error_msg}")
                 
         except httpx.RequestError as e:

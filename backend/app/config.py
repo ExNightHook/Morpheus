@@ -24,9 +24,9 @@ class Settings(BaseSettings):
     # NicePay
     nicepay_merchant_id: str = Field("", env="NICEPAY_MERCHANT_ID")
     nicepay_secret_key: str = Field("", env="NICEPAY_SECRET_KEY")
-    nicepay_currency: str = Field("USD", env="NICEPAY_CURRENCY")
-    # Список доступных методов оплаты, разделенных запятой (например: "paypal_usd,advcash_usd")
-    nicepay_methods: str = Field("paypal_usd", env="NICEPAY_METHODS")
+    nicepay_currency: str = Field("RUB", env="NICEPAY_CURRENCY")
+    # Список доступных методов оплаты, разделенных запятой (например: "sbp_rub,sberbank_rub,tinkoff_rub")
+    nicepay_methods: str = Field("sbp_rub,sberbank_rub,tinkoff_rub", env="NICEPAY_METHODS")
     nicepay_success_url: str = Field("", env="NICEPAY_SUCCESS_URL")
     nicepay_fail_url: str = Field("", env="NICEPAY_FAIL_URL")
 

@@ -1,6 +1,6 @@
 # Morpheus
 
-Полноценный пример проекта для развертывания телеграм‑бота и API продаж ключей/билдов с оплатой через Anypay на VPS (Ubuntu).
+Полноценный пример проекта для развертывания телеграм‑бота и API продаж ключей/билдов с оплатой через NicePay на VPS (Ubuntu).
 
 ## Кратко о стеке
 - Python 3.11, FastAPI, aiogram 3
@@ -27,7 +27,7 @@ docker compose logs api | grep "Generated admin credentials"
 ## Что настроить в `.env`
 - `TELEGRAM_BOT_TOKEN` — токен бота.
 - `BOT_ADMINS` — id админов через запятую.
-- `ANYPAY_*` — данные мерчанта (project_id, api_id, api_key, метод и валюту).
+- `NICEPAY_*` — данные мерчанта (merchant_id, secret_key, методы оплаты и валюту).
 - `PUBLIC_BASE_URL` — https://IP (без домена допустимо, сертификат самоподписанный).
 
 После правки перезапустите API:
@@ -39,7 +39,7 @@ sudo docker compose restart api
 - Админ API: `/admin/*` (OAuth2 Bearer). Вход — POST `/admin/login` (form: username/password), токен использовать в остальных вызовах.
 - Каталог/покупки для бота: бот сам использует публичные эндпоинты `/api/*`.
 - Проверка лицензии клиентом: `POST /api/{product}/auth` с `{"key": "...", "uuid": "..."}`.
-- Вебхук Anypay: `POST /payments/anypay/webhook` (status=paid переводит заказ в оплачен и отправляет ключ + билд).
+- Вебхук NicePay: `GET /payments/nicepay/webhook` (result=success переводит заказ в оплачен и отправляет ключ + билд).
 - Healthcheck: `/health`
 - Входная точка, требуемая ТЗ: `https://<host>/Morpheus%20Private/` редиректит в Swagger (`/docs`).
 
@@ -48,7 +48,7 @@ sudo docker compose restart api
 2. Сгенерировать ключи (`POST /admin/keys/generate`), загрузить билд (`POST /admin/builds/{product_id}`).
 3. Настроить бота (`PUT /admin/settings` → `bot_enabled=true`, при необходимости maintenance/off).
 4. Запустить/перезапустить контейнер `api`.
-5. Проверить ботом `/start`, купить товар — получите ссылку Anypay; после оплаты придёт билд+ключ.
+5. Проверить ботом `/start`, купить товар — получите ссылку NicePay; после оплаты придёт билд+ключ.
 
 ## Где лежат файлы
 - API и бот: `backend/app/*`

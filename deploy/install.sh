@@ -57,13 +57,12 @@ SECRET_KEY=$(openssl rand -hex 32)
 ACCESS_TOKEN_EXPIRE_MINUTES=1440
 TELEGRAM_BOT_TOKEN=
 BOT_ADMINS=
-ANYPAY_PROJECT_ID=
-ANYPAY_API_ID=
-ANYPAY_API_KEY=
-ANYPAY_CURRENCY=RUB
-ANYPAY_METHOD=card
-ANYPAY_SUCCESS_URL=http://localhost/success
-ANYPAY_FAIL_URL=http://localhost/fail
+NICEPAY_MERCHANT_ID=
+NICEPAY_SECRET_KEY=
+NICEPAY_CURRENCY=RUB
+NICEPAY_METHODS=sbp_rub,sberbank_rub,tinkoff_rub
+NICEPAY_SUCCESS_URL=
+NICEPAY_FAIL_URL=
 PUBLIC_BASE_URL=https://localhost
 EOF
     fi
@@ -144,7 +143,7 @@ fi
 
 echo ""
 echo "Installation complete."
-echo "Edit ${ENV_FILE} to set TELEGRAM_BOT_TOKEN and anypay keys, then run:"
+echo "Edit ${ENV_FILE} to set TELEGRAM_BOT_TOKEN and NicePay keys, then run:"
 echo "  sudo docker compose restart api"
 echo ""
 echo "Management commands:"
