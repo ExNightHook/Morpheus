@@ -31,21 +31,10 @@ async def nicepay_webhook(
 ):
     """
     Обработчик webhook от NicePay.
-    
-    Принимает GET запрос с параметрами:
-    - result: Финальный статус (success или error)
-    - payment_id: ID платежа в NicePay
-    - merchant_id: ID мерчанта
-    - order_id: ID заказа в нашей системе
-    - amount: Сумма платежа в центах/копейках
-    - amount_currency: Валюта платежа
-    - profit: Сумма дохода в центах/копейках
-    - profit_currency: Валюта дохода
-    - method: Метод оплаты
-    - hash: Цифровая подпись запроса
     """
+    logger.info(f"Received NicePay webhook: order_id={order_id}, result={result}, payment_id={payment_id}")
+    
     # Формируем словарь параметров для проверки подписи
-    # Все значения должны быть строками для правильной сортировки и хеширования
     params = {
         "result": str(result),
         "payment_id": str(payment_id),
@@ -73,26 +62,37 @@ async def nicepay_webhook(
             logger.warning(f"Order {order_id} not found for webhook")
             raise HTTPException(status_code=404, detail="Order not found")
         
-        # Конвертируем amount из центов в рубли для сравнения
-        # Если валюта не RUB, нужно учитывать курс (упрощенно)
+        # Конвертируем amount из центов/копеек в рубли
         amount_rub = amount / 100.0
-        if amount_currency != "RUB":
-            # Примерный курс (нужно настроить реальный)
-            if amount_currency == "USD":
-                amount_rub = amount_rub * 100.0  # Примерный курс 1 USD = 100 RUB
         
-        # Проверяем сумму (с небольшой погрешностью)
-        if abs(amount_rub - order.amount) > 1.0:
-            logger.warning(f"Webhook amount {amount_rub} differs from order amount {order.amount} for order {order_id}")
-            # Не блокируем, но логируем
+        # Если валюта не RUB, конвертируем (упрощенно)
+        if amount_currency != "RUB":
+            # Примерные курсы (должны совпадать с теми, что в bot.py)
+            if amount_currency == "USD":
+                amount_rub = amount_rub * 100.0  # 1 USD = 100 RUB
+            elif amount_currency == "EUR":
+                amount_rub = amount_rub * 110.0  # 1 EUR = 110 RUB
+            elif amount_currency == "UAH":
+                amount_rub = amount_rub / 4.0    # 1 RUB = 4 UAH
+            elif amount_currency == "KZT":
+                amount_rub = amount_rub / 5.0    # 1 RUB = 5 KZT
+        
+        # Проверяем сумму (с погрешностью 10%)
+        expected_amount = order.amount
+        difference = abs(amount_rub - expected_amount)
+        max_difference = expected_amount * 0.1  # 10% погрешность
+        
+        if difference > max_difference:
+            logger.warning(f"Webhook amount {amount_rub} differs significantly from order amount {expected_amount} for order {order_id}")
         
         # Обрабатываем статус платежа
         if result == "success":
-            if order.status != OrderStatus.paid:  # Предотвращаем двойную обработку
+            if order.status != OrderStatus.paid:
                 order.status = OrderStatus.paid
                 order.provider_pay_id = payment_id
+                order.paid_at = datetime.utcnow()
+                
                 if order.key:
-                    # Только при успешной оплате помечаем ключ как проданный и привязываем к пользователю
                     if order.key.status == KeyStatus.available:
                         order.key.status = KeyStatus.sold
                         order.key.sold_at = datetime.utcnow()
@@ -100,21 +100,30 @@ async def nicepay_webhook(
                         logger.info(f"Order {order.id} marked as paid. Key {order.key.id} marked as sold and linked to user {order.user_id}.")
                     else:
                         logger.warning(f"Order {order.id} paid, but key {order.key.id} status is {order.key.status}, not available. Skipping status change.")
+                
                 db.commit()
+                
+                # Отправляем ключ пользователю через бота
                 if bot_service:
                     await bot_service.send_order_delivery(order.id)
+                    logger.info(f"Order {order.id} delivery sent to user")
+                
             else:
                 logger.info(f"Order {order.id} already paid, skipping.")
+                
         elif result == "error":
-            if order.status != OrderStatus.failed:  # Предотвращаем двойную обработку
+            if order.status != OrderStatus.failed:
                 order.status = OrderStatus.failed
+                order.failed_at = datetime.utcnow()
+                
                 # Возвращаем ключ в доступные, если платеж не прошел
                 if order.key and order.key.status == KeyStatus.sold:
                     order.key.status = KeyStatus.available
                     order.key.sold_at = None
                     order.key.sold_to_user_id = None
+                    logger.info(f"Order {order.id} marked as failed. Key {order.key.id} reverted to available.")
+                
                 db.commit()
-                logger.info(f"Order {order.id} marked as failed. Key {order.key.id if order.key else 'N/A'} reverted to available.")
             else:
                 logger.info(f"Order {order.id} already failed, skipping.")
         else:
@@ -122,9 +131,9 @@ async def nicepay_webhook(
         
         # Возвращаем JSON ответ согласно документации NicePay
         return {"result": {"message": "Success"}}
+        
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Webhook error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-

@@ -60,6 +60,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     telegram_id = Column(BigInteger, unique=True, nullable=False)
     username = Column(String(150))
+    email = Column(String, nullable=True)  # Добавьте это поле
     is_admin = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_seen = Column(DateTime, default=datetime.utcnow)
