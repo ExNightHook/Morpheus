@@ -531,55 +531,28 @@ class BotService:
 
                 desc = f"{product.title} {duration}d / Telegram ID: {user.telegram_id}"
                 
-                # Генерируем автоматический email для NicePay
+                # Генерируем автоматический email
                 customer_email = f"user_{user.telegram_id}@example.com"
                 
                 try:
-                    # Определяем валюту на основе метода оплаты
-                    method_lower = method.lower() if method else ""
-                    if method_lower.endswith("_rub"):
-                        currency = "RUB"
-                        # Рубли в копейки: price_rub * 100
-                        amount = price.price_rub * 100
-                    elif method_lower.endswith("_usd"):
-                        currency = "USD"
-                        # RUB → USD по курсу 100, затем в центы
-                        amount = price.price_rub
-                    elif method_lower.endswith("_eur"):
-                        currency = "EUR"
-                        # RUB → EUR по курсу 110, затем в центы
-                        amount = int(price.price_rub / 110.0 * 100)
-                    elif method_lower.endswith("_uah"):
-                        currency = "UAH"
-                        # RUB → UAH по курсу 4, затем в копейки
-                        amount = int(price.price_rub * 4.0 * 100)
-                    elif method_lower.endswith("_kzt"):
-                        currency = "KZT"
-                        # RUB → KZT по курсу 5, затем в тиыны
-                        amount = int(price.price_rub * 5.0 * 100)
-                    elif method_lower.endswith("_usdt"):
-                        currency = "USD"
-                        # USDT обычно эквивалентен USD
-                        amount = price.price_rub
-                    else:
-                        currency = "RUB"
-                        amount = price.price_rub * 100
+                    # ПРОСТАЯ конвертация: всегда RUB, рубли в копейки
+                    currency = "RUB"
+                    amount = int(price.price_rub * 100)  # Рубли → копейки
                     
-                    logger.info(f"Creating payment via NicePay API:")
-                    logger.info(f"  Order ID: {order.id}")
-                    logger.info(f"  Amount in cents/kopecks: {amount} {currency}")
-                    logger.info(f"  Customer email: {customer_email}")
+                    logger.info(f"=== BOT PAYMENT CREATION ===")
+                    logger.info(f"Order ID: {order.id}")
+                    logger.info(f"Product: {product.title}, Price: {price.price_rub} RUB")
+                    logger.info(f"Amount in kopecks: {amount}")
+                    logger.info(f"Customer email: {customer_email}")
+                    logger.info(f"Description: {desc}")
                     
                     # Создаем платеж через NicePay API
-                    # Не передаем method, success_url, fail_url - как в тестовом запросе
                     payment_result = await self.nicepay.create_payment(
                         order_id=str(order.id),
-                        amount=amount,  # Уже в копейках/центах!
+                        amount=amount,  # Копейки!
                         currency=currency,
                         customer=customer_email,
                         description=desc,
-                        # Не передаем method - пользователь выберет на стороне NicePay
-                        # Не передаем success_url, fail_url - используем настройки мерчанта
                     )
                     
                     if not payment_result.get("success") or not payment_result.get("link"):
@@ -588,22 +561,21 @@ class BotService:
                     payment_url = payment_result["link"]
                     payment_id = payment_result["payment_id"]
                     
-                    logger.info(f"Payment created successfully: {payment_url[:100]}...")
+                    logger.info(f"✅ Payment URL created: {payment_url[:80]}...")
                     
                     order.payment_url = payment_url
                     order.provider_pay_id = payment_id
                     order.status = OrderStatus.waiting
                     db.commit()
                     
-                    logger.info(f"Order {order.id} created successfully. Key {key.id} remains available until payment confirmation.")
+                    logger.info(f"✅ Order {order.id} created successfully!")
                     
                 except Exception as e:
-                    # При ошибке платежа - удаляем заказ
                     db.rollback()
                     if order.id:
                         db.delete(order)
                         db.commit()
-                    logger.error(f"Payment creation error for order {order.id}: {e}", exc_info=True)
+                    logger.error(f"❌ Payment creation error: {e}", exc_info=True)
                     error_message = str(e) if str(e) else "Неизвестная ошибка"
                     await call.answer(f"Ошибка создания платежа: {error_message}", show_alert=True)
                     return
